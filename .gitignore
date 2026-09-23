@@ -1,0 +1,31 @@
+# dependencies and build output
+node_modules/
+target/
+dist/
+out/
+cache/
+.turbo/
+
+# secrets (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# runtime data and proofs
+storage/
+artifacts/
+vendor/
+*.tlsn
+*.tlsn.*
+
+# local TLS material
+certs/
+*.pem
+*.key
+*.crt
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/
+*.log
