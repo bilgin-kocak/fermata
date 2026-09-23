@@ -125,6 +125,7 @@ not backed by Tempo's sources (mainnet tooling uses pathUSD and USDC.e); irrelev
 | EVM differences | no ETH: `BALANCE`, `SELFBALANCE`, `CALLVALUE` return 0; non-zero `value` is rejected (`ValueTransferNotAllowed`); `eth_getBalance` returns a placeholder constant. **New storage slot 250,000 gas; new account 250,000; code 1,000 gas/byte; deployments 5–10× Ethereum**; first transfer to a new address ≈ 300k gas. EOAs may be auto-delegated (EIP-7702) to a default account at `0x7702c0…`, so `code.length == 0` does not identify EOAs | `quickstart/evm-compatibility.mdx`; `protocol/transactions/eip-7702.mdx`; repo script `scripts/auto-7702-delegation.sh` (partly verified) | — |
 | Tempo transaction type | EIP-2718 type `0x76`: batched `calls`, `fee_token`, fee sponsorship (0x78 domain), parallel/expiring nonces, access keys (`0xAAAAAAAA…`), passkey signatures. Legacy and EIP-1559 txs still work | `protocol/transactions/spec-tempo-transaction.mdx` | — |
 | EIP-712 / EIP-2612 / ecrecover | unchanged for secp256k1 accounts; permit uses ecrecover with `block.chainid = 42431`. Passkey signatures verify via the SignatureVerifier precompile `0x5165300000000000000000000000000000000000` | `sdk/foundry/signature-verifier.mdx` | CONFIRMS |
+| **Anvil Tempo emulation** (spike finding) | `anvil --chain-id 42431` selects Foundry's built-in `tempo` network config: TIP-20 precompiles are live (`0x20c0…0000` answers `name()="PathUSD"`, `decimals()=6`, `DOMAIN_SEPARATOR()`, `nonces()`, `permit`, `transferWithMemo` emitting `TransferWithMemo`), dev accounts are pre-funded with max balances, fees are deducted in a stablecoin (`Transfer(payer → 0xfeec…0000)` in the receipt; default fee token for dev accounts = AlphaUSD via `userTokens`), `tempo_fundAddress` is not served, `--hardfork` is rejected ("conflicts with network config tempo"). So contract tests can run against real TIP-20 semantics locally; economics numbers still come from Moderato | `spikes/tip20/run.sh`, `spikes/proof-path/run.sh` (2026-09-23) | — |
 | Foundry | upstream Foundry supports Tempo from **v1.7.0 (2026-04-28)**; `forge create/script --broadcast --verify` work against Moderato with `--rpc-url https://rpc.moderato.tempo.xyz`; `--tempo.fee-token` optional (a deploy is not a TIP-20 call → pathUSD); deploy with the main key ("Access keys can sign calls but not deployments"); batches: value 0, one creation max. Foundry's support is tx sending; **Anvil does not emulate fee tokens or the Tempo gas schedule** | `sdk/foundry/index.mdx`; Foundry v1.7.0 release notes | — |
 
 ## 8. Explorer and contract verification
@@ -186,6 +187,7 @@ Local clone in the scratchpad; file paths below are relative to `src/`.
 | Payment phase | auto-pays a **Tempo testnet** challenge with a fresh faucet-funded wallet (needs the Moderato RPC); then checks `Payment-Receipt`, `status: "success"`, reference format, timestamp, body, `Content-Type` |
 | **Custom methods** | `supportedPaymentMethods = {tempo, evm, stripe}`; any other method's challenge is **silently skipped** in the payment phase (no pass/fail line), even if configured in `mppx.config` (`cli/validate/payment.ts` ~262–270). Expect: fermata challenge passes the generic checks, payment tested only via the tempo fallback |
 | Quirks | switches to JSON mode automatically when `CLAUDECODE` or `CODEX*` env vars are set (`cli/utils.ts`) |
+| Observed (spike, 2026-09-23) | against the probe-2 server: "Challenge parseable (2 methods: tempo/charge, probe/charge)", tempo field checks pass, `probe` gets no payment attempt, "Payment: auto-provision wallet (Failed to create and fund testnet wallet)" while the RPC is blocked; `--endpoint` skips discovery; warnings for a realm ≠ hostname and a missing `llms.txt`/`requestBody` (both fixable server-side). Summary "15 passed, 1 failed" |
 
 ## 12. TLSNotary
 
@@ -335,8 +337,17 @@ thread count (`RAYON_NUM_THREADS` unset = 4), localhost fixture (`tlsn-server-fi
 | `attestation_verify json` | 0.007 s | offline, custom root CA | 2026-09-23 |
 | `example-json.attestation.tlsn` / `.secrets.tlsn` / `.presentation.tlsn` | 7,184 B / 13,739 B / **9,819 B** | bincode 1.3.3 | 2026-09-23 |
 | Notary key algorithm printed by the verifier | `k256` (SEC1 compressed, 33 bytes) | example's dummy key `[1u8; 32]` | 2026-09-23 |
-| Fermata prove-time per call (attestor, TCP notary, POST body) | _Milestone S / 2_ | | |
+| **Spike prove-time, MPC mode**: separate TCP notary process, POST body, Node TLS 1.2 vendor | **median 1.1–1.5 s** (runs 0.93–2.5 s) | `spikes/proof-path/run.sh`, 4 vCPU shared by prover + notary, 4096/16384 | 2026-09-23 |
+| Spike prove-time, **proxy mode** (notary relays the encrypted stream) | **0.46–0.51 s** | same setup, `--mode proxy` | 2026-09-23 |
+| Spike presentation size | **5,162 B** (raw + HTTP-structured commitments); 1,916 B raw-only (malformed-JSON response) | bincode 1.3.3 | 2026-09-23 |
+| Spike offline verify + predicate + EIP-712 sign | < 10 ms | `verify` binary | 2026-09-23 |
+| `settle` on Anvil (Tempo emulation, chain 42431) | 133,588 gas (Foundry) / 0.0046 AlphaUSD fee observed on Anvil | `SpikeSettle` | 2026-09-23 |
+| `permit` + `transferFromWithMemo` via `PullProbe` on Anvil-Tempo | 567,239 gas, fee 5,977 units AlphaUSD (≈ $0.006), EIP-1559 tx | fresh agent, relayer pays | 2026-09-23 |
 | 100-call load test: wall-clock, per-call prove time, bandwidth | _Milestone 4_ | | |
+
+Spike caveat: with prover and notary on the same 4-vCPU box, an MPC session occasionally hangs
+(one of four runs needed the retry); WebProof documents the same. Never run two MPC sessions
+concurrently on this hardware.
 
 Reading: on localhost the published WAN figures (3.6–14.5 s per session) collapse to ≈ 1.2 s
 because the ≈ 25–30 MB of MPC setup traffic never leaves the machine. A 100-call sequential run

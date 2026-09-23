@@ -29,3 +29,13 @@ certs/
 .idea/
 .vscode/
 *.log
+
+# spikes (throwaway): build output, generated artefacts, logs, local certs
+spikes/**/lib/
+spikes/**/out/
+spikes/**/cache/
+spikes/**/logs/
+spikes/**/target/
+spikes/proof-path/certs/
+spikes/proof-path/contract/vector.json
+spikes/**/*.json.bak

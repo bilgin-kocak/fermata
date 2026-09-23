@@ -1,6 +1,8 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-23**: Milestone 0 done. 19 days remain to the 2026-10-12 deadline.
+Status as of **2026-09-23**: Milestone 0 done; **Milestone S done — all three probes GREEN on
+their local legs** (`spikes/README.md`); Moderato legs DEFERRED until the RPC is reachable from
+the build environment (Bilgin: local GREEN unlocks Milestone 1). 19 days remain to 2026-10-12.
 Freeze (demo, video, README) on **2026-10-09**, 72 h before the deadline, per the prompt.
 
 ## Calendar
@@ -8,7 +10,7 @@ Freeze (demo, video, README) on **2026-10-09**, 72 h before the deadline, per th
 | Milestone | Prompt estimate | Revised | Planned dates | Why the change |
 |---|---|---|---|---|
 | 0 Facts and plan | 0.5 d | 1 d (done) | 09-23 | doc hosts blocked → read GitHub sources; built tlsn |
-| S Integration spike | 1–1.5 d | 1.5 d | 09-24 → 09-25 | + EIP-712 cross-check vector, + TCP notary probe, + proxy-mode measurement; probe 3 partly waits on RPC access |
+| S Integration spike | 1–1.5 d | done in 1 d (09-23) | 09-23 | all local legs GREEN; Moderato legs deferred (RPC blocked) |
 | 1 Escrow contract | 2 d | 2 d | 09-26 → 09-27 | unchanged; deploy needs the RPC |
 | 2 Attestor | 3–4 d | 3.5–4 d | 09-28 → 10-01 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
 | 3 Gateway + method + SDK | 3 d | 3 d | 10-02 → 10-04 | unchanged; receipt emission mechanism already found |
@@ -20,6 +22,30 @@ Largest schedule risk: every on-chain step (spike probes 1 and 3, M1 deploy, M3/
 the validator's payment) needs `rpc.moderato.tempo.xyz`, which the build environment still
 blocks. Bilgin is allowing the hosts; until then contract work runs on Anvil with a TIP-20 mock
 and on-chain steps are deferred, never faked. Second risk: `mppx@0.11.0` is a day-old release.
+
+## Milestone S results (2026-09-23)
+
+`spikes/gate.sh` → PROBE 1/2/3 GREEN. Facts learned that shape the next milestones:
+- **Raw whole-transcript commitments** are mandatory: tlsn's HTTP parser rejects malformed
+  bodies, so the prover commits `0..len` of both directions and adds the HTTP-structured
+  commitments only when parsing succeeds; the verifier parses raw bytes with `httparse` and the
+  predicate decides. A 500 and a truncated-JSON response both produced `FAILED` verdicts.
+- **Two-process notary works** over plain TCP (half-close, `read_to_end`); MPC mode ≈ 1.1–1.5 s
+  per call on 4 vCPU, proxy mode ≈ 0.5 s. One MPC hang in four runs → the attestor keeps a
+  150 s timeout + one retry, and the gateway must serialise proving on small machines.
+- **EIP-712**: Rust k256 signature == Foundry `vm.sign` byte for byte; `SpikeSettle.settle`
+  accepts it and rejects replay; domain must use the deployed escrow address (verify takes
+  `--escrow`/`--chain-id`).
+- **mppx**: `requestHash` is computed by the route from the cloned body and passed as the
+  `probe` route option in a per-request `compose`; the `request` hook only echoes `callId`;
+  receipt overwritten after `withReceipt`; `Store.tryClaim` on callId; plain `Error` → 500.
+  Discovery needs handler-style routes (legacy routes don't merge method defaults) plus
+  `/llms.txt` and a `requestBody` to satisfy the validator.
+- **Anvil emulates Tempo** (chain id 42431): real TIP-20 precompile semantics incl. permit and
+  memo events, stablecoin fee deduction (AlphaUSD by default for dev accounts). Milestone 1's
+  Foundry tests can target the emulated precompile as well as the mock.
+- **TIP-20 hold shape confirmed**: `permit` + `transferFromWithMemo` in one tx, memo = callId
+  readable by topic, 567k gas, ≈ $0.006 fee, relayer pays, no fee-token setup needed.
 
 ## What changed against the prompt (design deltas forced by FACTS.md)
 

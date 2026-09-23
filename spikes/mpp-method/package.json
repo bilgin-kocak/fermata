@@ -1,0 +1,22 @@
+{
+  "name": "spike-mpp-method",
+  "private": true,
+  "type": "module",
+  "description": "Fermata Milestone S probe 2: custom `probe` MPP method next to the built-in tempo method (throwaway spike)",
+  "scripts": {
+    "server": "tsx server.ts",
+    "client:probe": "tsx client-probe.ts",
+    "client:vanilla": "tsx client-vanilla.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.0",
+    "hono": "^4.13.7",
+    "mppx": "0.11.0",
+    "viem": "^2.56.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22"
+  }
+}
