@@ -8,7 +8,7 @@ cleanup() { for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done; ech
 trap cleanup EXIT
 fail() { REASON="$1"; echo "FAIL: $1" >&2; exit 1; }
 mkdir -p logs
-[ -d node_modules ] || pnpm install --reporter=silent
+[ -d node_modules ] || pnpm install --ignore-workspace --reporter=silent
 [ -d lib/forge-std ] || forge install foundry-rs/forge-std --no-git > logs/forge-install.log 2>&1
 echo "== forge test (mock TIP-20 + permit + memo log) =="
 forge test > logs/forge.log 2>&1 || { tail -20 logs/forge.log; fail "forge test"; }; grep -E 'tests passed' logs/forge.log | tail -1

@@ -1,0 +1,937 @@
+{
+  "FermataEscrow": {
+    "abi": [
+      {
+        "type": "constructor",
+        "inputs": [
+          {
+            "name": "owner_",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "treasury_",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "feeBps_",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "DOMAIN_SEPARATOR",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "MAX_FEE_BPS",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "MAX_WINDOW",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint32",
+            "internalType": "uint32"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "OUTCOME_DELIVERED",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint8",
+            "internalType": "uint8"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "OUTCOME_FAILED",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint8",
+            "internalType": "uint8"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "VERDICT_TYPEHASH",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "claimTimeout",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "feeBps",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "getHold",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "hv",
+            "type": "tuple",
+            "internalType": "struct FermataEscrow.HoldView",
+            "components": [
+              {
+                "name": "agent",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "serviceId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "requestHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "amount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "heldAt",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "deadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "feeBps",
+                "type": "uint16",
+                "internalType": "uint16"
+              },
+              {
+                "name": "status",
+                "type": "uint8",
+                "internalType": "enum FermataEscrow.Status"
+              }
+            ]
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "getService",
+        "inputs": [
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "type": "tuple",
+            "internalType": "struct FermataEscrow.Service",
+            "components": [
+              {
+                "name": "owner",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "settlementWindow",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "payout",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "token",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "verifier",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "pricePerCall",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "predicateHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "originHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "notaryKeyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              }
+            ]
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "hashVerdict",
+        "inputs": [
+          {
+            "name": "v",
+            "type": "tuple",
+            "internalType": "struct FermataEscrow.Verdict",
+            "components": [
+              {
+                "name": "callId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "serviceId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "requestHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "predicateHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "outcome",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "presentationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "responseHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "issuedAt",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "stateMutability": "pure"
+      },
+      {
+        "type": "function",
+        "name": "hold",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "requestHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "v",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "r",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "s",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "owner",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "registerService",
+        "inputs": [
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "payoutAddress",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pricePerCall",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementWindow",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "verifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "predicateHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "originHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "notaryKeyHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "setFeeBps",
+        "inputs": [
+          {
+            "name": "newFeeBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "setTreasury",
+        "inputs": [
+          {
+            "name": "newTreasury",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "settle",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "v",
+            "type": "tuple",
+            "internalType": "struct FermataEscrow.Verdict",
+            "components": [
+              {
+                "name": "callId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "serviceId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "requestHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "predicateHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "outcome",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "presentationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "responseHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "issuedAt",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
+          },
+          {
+            "name": "sig",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "settlementDeadline",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "treasury",
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "",
+            "type": "address",
+            "internalType": "address"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "function",
+        "name": "verdictDigest",
+        "inputs": [
+          {
+            "name": "v",
+            "type": "tuple",
+            "internalType": "struct FermataEscrow.Verdict",
+            "components": [
+              {
+                "name": "callId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "serviceId",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "requestHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "predicateHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "outcome",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "presentationHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "responseHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "issuedAt",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ],
+        "stateMutability": "view"
+      },
+      {
+        "type": "event",
+        "name": "FeeBpsUpdated",
+        "inputs": [
+          {
+            "name": "feeBps",
+            "type": "uint16",
+            "indexed": false,
+            "internalType": "uint16"
+          }
+        ],
+        "anonymous": false
+      },
+      {
+        "type": "event",
+        "name": "Held",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "agent",
+            "type": "address",
+            "indexed": true,
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "requestHash",
+            "type": "bytes32",
+            "indexed": false,
+            "internalType": "bytes32"
+          }
+        ],
+        "anonymous": false
+      },
+      {
+        "type": "event",
+        "name": "Refunded",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "agent",
+            "type": "address",
+            "indexed": true,
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "presentationHash",
+            "type": "bytes32",
+            "indexed": false,
+            "internalType": "bytes32"
+          }
+        ],
+        "anonymous": false
+      },
+      {
+        "type": "event",
+        "name": "Released",
+        "inputs": [
+          {
+            "name": "callId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "payout",
+            "type": "address",
+            "indexed": true,
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "fee",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "presentationHash",
+            "type": "bytes32",
+            "indexed": false,
+            "internalType": "bytes32"
+          }
+        ],
+        "anonymous": false
+      },
+      {
+        "type": "event",
+        "name": "ServiceRegistered",
+        "inputs": [
+          {
+            "name": "serviceId",
+            "type": "bytes32",
+            "indexed": true,
+            "internalType": "bytes32"
+          },
+          {
+            "name": "owner",
+            "type": "address",
+            "indexed": true,
+            "internalType": "address"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "indexed": true,
+            "internalType": "address"
+          },
+          {
+            "name": "payout",
+            "type": "address",
+            "indexed": false,
+            "internalType": "address"
+          },
+          {
+            "name": "verifier",
+            "type": "address",
+            "indexed": false,
+            "internalType": "address"
+          },
+          {
+            "name": "pricePerCall",
+            "type": "uint256",
+            "indexed": false,
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementWindow",
+            "type": "uint32",
+            "indexed": false,
+            "internalType": "uint32"
+          }
+        ],
+        "anonymous": false
+      },
+      {
+        "type": "event",
+        "name": "TreasuryUpdated",
+        "inputs": [
+          {
+            "name": "treasury",
+            "type": "address",
+            "indexed": true,
+            "internalType": "address"
+          }
+        ],
+        "anonymous": false
+      },
+      {
+        "type": "error",
+        "name": "CallIdMismatch",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "CallIdUsed",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "FeeTooHigh",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "InvalidCall",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "InvalidOutcome",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "InvalidPresentation",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "InvalidRecipient",
+        "inputs": [
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      },
+      {
+        "type": "error",
+        "name": "InvalidService",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "InvalidSignature",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "NotHeld",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "NotOwner",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "PredicateMismatch",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "RecipientBlocked",
+        "inputs": [
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "reason",
+            "type": "uint8",
+            "internalType": "enum ITIP403Registry.BlockedReason"
+          }
+        ]
+      },
+      {
+        "type": "error",
+        "name": "RequestMismatch",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "ServiceExists",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "ServiceIdNotOwned",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "ServiceMismatch",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "TransferFailed",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "UnknownService",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "WindowClosed",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "WindowOpen",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "WrongVerifier",
+        "inputs": []
+      },
+      {
+        "type": "error",
+        "name": "ZeroAddress",
+        "inputs": []
+      }
+    ],
+    "networks": {}
+  }
+}

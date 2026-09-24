@@ -1,0 +1,28 @@
+{
+  "name": "fermata",
+  "private": true,
+  "type": "module",
+  "description": "Fermata — pay on proof: escrowed machine payments on Tempo, released on TLSNotary evidence",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.21"
+  },
+  "scripts": {
+    "contracts:build": "cd contracts && forge build",
+    "contracts:test": "cd contracts && forge test && FOUNDRY_PROFILE=tempo forge test --network tempo",
+    "sdk:test": "pnpm -F @fermata/sdk test",
+    "test": "pnpm contracts:test && pnpm sdk:test",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -F @fermata/sdk typecheck",
+    "keys:init": "tsx scripts/keys-init.ts",
+    "escrow:deploy": "bash scripts/deploy-escrow.sh",
+    "escrow:roundtrip": "NODE_USE_ENV_PROXY=1 tsx scripts/escrow-roundtrip.ts",
+    "escrow:e2e:anvil": "bash scripts/e2e-anvil.sh"
+  },
+  "devDependencies": {
+    "@fermata/sdk": "workspace:*",
+    "@types/node": "^22.19.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "viem": "^2.56.8"
+  }
+}

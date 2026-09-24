@@ -39,3 +39,7 @@ spikes/**/target/
 spikes/proof-path/certs/
 spikes/proof-path/contract/vector.json
 spikes/**/*.json.bak
+
+# contracts (Foundry)
+contracts/broadcast/
+contracts/cache/

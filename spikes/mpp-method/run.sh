@@ -10,7 +10,7 @@ trap cleanup EXIT
 fail() { REASON="$1"; echo "FAIL: $1" >&2; exit 1; }
 mkdir -p logs
 kill_stale; sleep 0.3
-[ -d node_modules ] || pnpm install --reporter=silent
+[ -d node_modules ] || pnpm install --ignore-workspace --reporter=silent
 start_server() { setsid env "$@" npx tsx server.ts > logs/server.log 2>&1 & SPID=$!; for i in $(seq 1 60); do grep -q 'server ready' logs/server.log 2>/dev/null && break; sleep 0.25; done; grep -q 'server ready' logs/server.log || { cat logs/server.log; fail "server start"; }; }
 stop_server() { kill_group "$SPID"; SPID=""; sleep 0.7; }
 

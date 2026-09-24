@@ -4,5 +4,5 @@ out = "out"
 libs = ["lib"]
 test = "test"
 evm_version = "osaka"
-solc = "/root/.foundry/bin/solc"
+solc = "0.8.30"
 fs_permissions = [{ access = "read", path = "./" }]

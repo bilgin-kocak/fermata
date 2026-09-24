@@ -1,0 +1,33 @@
+# Fermata contracts. Solidity 0.8.30, EVM "osaka" (Tempo's target hardfork), no via_ir.
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc = "0.8.30"
+evm_version = "osaka"
+optimizer = true
+optimizer_runs = 200
+fs_permissions = [{ access = "read", path = "./test/fixtures" }]
+
+[profile.default.fuzz]
+runs = 512
+
+[profile.default.invariant]
+runs = 128
+depth = 64
+fail_on_revert = false
+
+# Core escrow cases against the real TIP-20 precompile:
+#   FOUNDRY_PROFILE=tempo forge test --network tempo
+[profile.tempo]
+test = "test-tempo"
+network = "tempo"
+
+[fmt]
+line_length = 120
+
+[lint]
+# Tests warp time on purpose and do not compile with via_ir, where this lint applies.
+exclude_lints = ["environment-read-across-mutation"]
