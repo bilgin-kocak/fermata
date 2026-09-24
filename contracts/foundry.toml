@@ -17,7 +17,7 @@ runs = 512
 [profile.default.invariant]
 runs = 128
 depth = 64
-fail_on_revert = false
+fail_on_revert = true
 
 # Core escrow cases against the real TIP-20 precompile:
 #   FOUNDRY_PROFILE=tempo forge test --network tempo
