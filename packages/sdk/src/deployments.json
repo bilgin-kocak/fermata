@@ -932,6 +932,19 @@
         "inputs": []
       }
     ],
-    "networks": {}
+    "networks": {
+      "anvil": {
+        "chainId": 42431,
+        "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "deployTx": "0x8a19cd550116f2a36d78db6f4453fcf33ffabd86f1dae7289527a0dfa8af42c0",
+        "deployBlock": 1,
+        "deployGasUsed": 8104657,
+        "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "owner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "treasury": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "feeBps": 50,
+        "deployedAt": "2026-09-24T16:37:10.603Z"
+      }
+    }
   }
 }
