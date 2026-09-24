@@ -14,11 +14,30 @@ Vocabulary: `hold → release(proof) → refund`.
 
 ## Status
 
-Milestone 0 (facts and plan) — no product code yet.
+Milestone 1 (escrow contract) done locally; Moderato deployment pending network access.
 
-- [`docs/FACTS.md`](docs/FACTS.md): verified facts about Tempo, MPP and TLSNotary, with sources and dates.
-- [`docs/PLAN.md`](docs/PLAN.md): milestone plan and estimates.
+- [`contracts/src/FermataEscrow.sol`](contracts/src/FermataEscrow.sol): `hold → settle(verdict) | claimTimeout`,
+  TIP-20 permit + `…WithMemo` transfers with memo = callId, EIP-712 verdicts.
+- [`docs/FACTS.md`](docs/FACTS.md): verified facts about Tempo, MPP and TLSNotary, with sources, dates and measurements.
+- [`docs/PLAN.md`](docs/PLAN.md): milestone plan, status and open risks.
 - [`PROMPT.md`](PROMPT.md): the build brief.
+
+## Quickstart
+
+Requires Foundry 1.8.3, Node ≥ 22.21 and pnpm 10.
+
+```sh
+git submodule update --init && pnpm install
+cd contracts && forge test                                  # unit, fuzz, invariant, Rust vectors
+FOUNDRY_PROFILE=tempo forge test --network tempo            # against the real TIP-20 precompile
+cd .. && pnpm sdk:test                                      # viem EIP-712 == Rust == Solidity
+pnpm escrow:e2e:anvil     # anvil --chain-id 42431: deploy + DELIVERED/FAILED/TIMEOUT round trip
+
+# Tempo Moderato testnet
+pnpm keys:init            # writes .env with fresh testnet keys; prints faucet commands
+pnpm escrow:deploy --chain moderato
+pnpm escrow:roundtrip --chain moderato
+```
 
 Hackathon submission for the Tempo track of Colosseum's Crypto World's Fair (deadline 2026-10-12).
 Testnet only (Tempo Moderato, chain ID 42431). Unaudited hackathon code.

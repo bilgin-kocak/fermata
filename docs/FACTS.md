@@ -345,6 +345,47 @@ thread count (`RAYON_NUM_THREADS` unset = 4), localhost fixture (`tlsn-server-fi
 | `permit` + `transferFromWithMemo` via `PullProbe` on Anvil-Tempo | 567,239 gas, fee 5,977 units AlphaUSD (≈ $0.006), EIP-1559 tx | fresh agent, relayer pays | 2026-09-23 |
 | 100-call load test: wall-clock, per-call prove time, bandwidth | _Milestone 4_ | | |
 
+### 15.1 FermataEscrow gas on Anvil-Tempo (Milestone 1, 2026-09-24)
+
+Anvil 1.8.3 `--chain-id 42431` (real TIP-20 precompiles, storage credits, stablecoin fees).
+Reproduce: `pnpm escrow:e2e:anvil` (deploy + 3-case round trip); the permit/concurrency rows come
+from a one-off smoke run with the same contract. Anvil's base fee decays on an idle chain
+(1e10 → ~1.6e9 attodollars/gas across a run), so compare **gas**, not fees; Moderato's fee per
+gas is still unmeasured (RPC blocked here).
+
+| Operation | Gas | Notes |
+|---|---|---|
+| deploy (`forge script --network tempo`) | 8,104,657 | 6,955 B runtime; 1,000 gas/byte dominates |
+| `registerService` | 2.05–2.30M | 8 new slots; once per service |
+| `hold`, fresh agent + fresh escrow | 1,569,957 | 6 new slots: 3 hold slots, agent permit nonce, allowance (0→price→0), escrow balance |
+| `hold`, steady state (serial calls) | ~337,600 | 1 full-price slot; 4 slot creations refunded by storage credits |
+| `hold`, concurrent (escrow has no credits left) | ~825,300 | 3 full-price hold slots |
+| `hold` via an existing allowance (junk permit) | 83,272 | no nonce/allowance slot creation |
+| `approve(escrow, 5 × price)` | 527,930 | |
+| permit front-run by a third party, then `hold` | 537,274 + 828,916 | permit failure tolerated, allowance used |
+| `settle` DELIVERED (2 transfers) | 102–107k | first settle of a new escrow: 357,419 |
+| `settle` FAILED | 85–90k | |
+| `claimTimeout` | 74,398 | |
+| TIP-20 `transfer` to a new / existing address | 280,418 / 31,118 | |
+
+- **Storage credits (TIP-1060) — observed model:** a cleared slot credits its *owner* and later
+  slot creations by the same owner cost ~5k instead of 250k. The escrow owns its hold records
+  *and* its pathUSD balance slot; the agent owns its allowance slot. Evidence: after one
+  finalised hold (2 hold slots + escrow balance cleared) the next hold costs 337k, not 1.3M; with
+  two holds open at once the second costs exactly 2 × 245,000 more. Consequence: seeding the
+  escrow with 1 base unit saves only ~2k gas → not done.
+- The floor per call is **one permanent new slot** (the callId replay marker = hold slot 0).
+- Bubbled precompile errors decode by name: expired permit without allowance → `PermitExpired()`,
+  junk signature without allowance → `InvalidSignature()` (ITIP20 errors).
+- Anvil dev accounts do not share a fee token: dev0 pays in AlphaUSD, dev2 in ThetaUSD, dev4 in
+  pathUSD; a fresh account holding only pathUSD pays in pathUSD.
+- viem 2.56.8 ships `tempoModerato` in `viem/chains` (id 42431, Tempo transaction formatters,
+  expiring-nonce logic). The scripts use a plain `defineChain` with EIP-1559 transactions (proven
+  on Anvil); `tempoModerato` is the fallback if Moderato rejects them.
+- Spike MPC hang, 2026-09-24: prove 3 of 3 hung twice in one gate run (no output, killed by the
+  150 s guard) and passed on every other run (≈ 1.4–2.0 s). The spike now allows 3 attempts of
+  30 s each. Milestone 2's attestor must do the same (per-attempt timeout + retry).
+
 Spike caveat: with prover and notary on the same 4-vCPU box, an MPC session occasionally hangs
 (one of four runs needed the retry); WebProof documents the same. Never run two MPC sessions
 concurrently on this hardware.

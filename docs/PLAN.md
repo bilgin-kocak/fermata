@@ -1,8 +1,10 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-23**: Milestone 0 done; **Milestone S done — all three probes GREEN on
-their local legs** (`spikes/README.md`); Moderato legs DEFERRED until the RPC is reachable from
-the build environment (Bilgin: local GREEN unlocks Milestone 1). 19 days remain to 2026-10-12.
+Status as of **2026-09-24**: Milestones 0 and S done; **Milestone 1 done locally** —
+`FermataEscrow` with unit, fuzz, invariant, vector and real-precompile tests, deploy script and a
+3-case round trip green on Anvil's Tempo emulation; the Moderato deploy + round trip are
+**DEFERRED** because `rpc.moderato.tempo.xyz` is still refused (HTTP 403) by the build
+environment's network policy (one command each once allowed). 18 days remain to 2026-10-12.
 Freeze (demo, video, README) on **2026-10-09**, 72 h before the deadline, per the prompt.
 
 ## Calendar
@@ -11,7 +13,7 @@ Freeze (demo, video, README) on **2026-10-09**, 72 h before the deadline, per th
 |---|---|---|---|---|
 | 0 Facts and plan | 0.5 d | 1 d (done) | 09-23 | doc hosts blocked → read GitHub sources; built tlsn |
 | S Integration spike | 1–1.5 d | done in 1 d (09-23) | 09-23 | all local legs GREEN; Moderato legs deferred (RPC blocked) |
-| 1 Escrow contract | 2 d | 2 d | 09-26 → 09-27 | unchanged; deploy needs the RPC |
+| 1 Escrow contract | 2 d | done in 1 d (09-24) | 09-24 | local GREEN; Moderato deploy deferred (RPC blocked) |
 | 2 Attestor | 3–4 d | 3.5–4 d | 09-28 → 10-01 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
 | 3 Gateway + method + SDK | 3 d | 3 d | 10-02 → 10-04 | unchanged; receipt emission mechanism already found |
 | 4 Vendor, agent, dashboard | 3 d | 3 d | 10-05 → 10-07 | unchanged; cut dashboard scope first if slipping |
@@ -107,15 +109,39 @@ Throwaway code under `spikes/`, one README line per probe stating what it proved
 
 Gate: all three green → Milestone 1. Any red → stop and report.
 
-## Milestone 1 — escrow contract (2 d)
+## Milestone 1 — escrow contract (done locally 2026-09-24)
 
-Interface exactly as in `PROMPT.md`. Implementation notes from FACTS: no `msg.value`, no
-`code.length` checks (EIP-7702 delegated EOAs), hold record packed into as few slots as possible
-(250k gas per new slot), `foundry.toml` `evm_version = "osaka"`, `ITIP20` with the exact TIP-20
-signatures, Verdict EIP-712 domain `Fermata`/`1`/`block.chainid`/`address(this)`. Tests per the
-prompt plus the cross-check vector from the spike. Deploy script to Moderato with the faucet
-wallet; addresses and ABI to `packages/sdk/src/deployments.json`; explorer links to
-`explore.testnet.tempo.xyz`; verification via `contracts.tempo.xyz` if reachable.
+Interface as in `PROMPT.md` plus Bilgin's three decisions (settle only inside the window;
+serviceId = registrant address ‖ 12-byte label, checked on-chain, verifier trust checked in the
+SDK; timeout refunds emit `Refunded` with a zero presentationHash).
+
+Acceptance:
+- [x] `forge test`: 43 unit/fuzz + 3 vector (Rust-signed verdict settles) + invariant suite
+  (128 runs × 64 calls, `fail_on_revert`, mutation-checked); `FOUNDRY_PROFILE=tempo forge test
+  --network tempo`: 5 tests on the real pathUSD precompile and TIP-403 registry. Coverage of
+  `FermataEscrow.sol` 97.9 % lines / 92.3 % branches.
+- [x] Deploy script: `pnpm escrow:deploy --chain moderato|anvil` (`contracts/script/Deploy.s.sol`
+  via `forge script --network tempo`, then `scripts/export-deployment.ts`).
+- [x] Address + ABI in `packages/sdk/src/deployments.json` (anvil entry now; moderato on deploy).
+- [x] Round trip from a script: `pnpm escrow:roundtrip --chain anvil|moderato` — DELIVERED,
+  FAILED and TIMEOUT, each reconciled from `TransferWithMemo` logs by callId alone;
+  `pnpm escrow:e2e:anvil` runs deploy + round trip on a fresh Anvil in ≈ 25 s.
+- [ ] Moderato run with explorer links — DEFERRED (RPC 403). Keys already exist
+  (`pnpm keys:init`); needs faucet funding, `pnpm escrow:deploy --chain moderato`,
+  `pnpm escrow:roundtrip --chain moderato`.
+
+Deviations from the M1 plan: no 1-unit escrow seed (storage credits already refund the balance
+slot, FACTS §15.1); invariant `fail_on_revert = true` so handler assertions cannot be swallowed;
+spike gate hardened (notary-key poll — a `pipefail` bug aborted the probe silently whenever
+the notary took longer than an instant to print its key —, 30 s × 3 prove attempts, `tee` fix).
+Faked: nothing on-chain; the round trip's verdicts are signed by a script-held verifier key over
+placeholder presentation/response hashes — Milestone 2 replaces them with real presentations.
+
+Open risks: (1) per-call gas — one permanent slot per callId, so a hold is ≥ ~337k gas
+(~825k when holds overlap, 1.57M for a fresh agent's first hold); at 1e10 attodollars/gas that
+first hold costs ~$0.016 > the $0.01 demo price — revisit the price once Moderato's fee per gas
+is measured; (2) Moderato unreached from this environment; (3) MPC hangs → M2 needs
+per-attempt timeouts and retries.
 
 ## Milestone 2 — attestor (3.5–4 d)
 
