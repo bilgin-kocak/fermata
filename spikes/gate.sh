@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 declare -a lines=()
 for p in proof-path mpp-method tip20; do
   echo "########## $p ##########"
-  out=$("./$p/run.sh" 2>&1 | tee "/dev/stderr" | grep -E '^PROBE [123]:' | tail -1)
+  out=$("./$p/run.sh" 2>&1 | tee >(cat >&2) | grep -E '^PROBE [123]:' | tail -1)
   lines+=("${out:-PROBE ?: RED(no result line from $p)}")
 done
 echo "########## gate ##########"

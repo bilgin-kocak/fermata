@@ -29,14 +29,15 @@ start_vendor
 echo | openssl s_client -tls1_2 -cipher ECDHE-ECDSA-AES128-GCM-SHA256 -curves prime256v1 -servername vendor.fermata.test -CAfile certs/ca.pem -connect 127.0.0.1:8443 2>&1 | grep -q 'Verify return code: 0' || fail "openssl preflight"
 
 echo "== notary =="
-./target/release/notary --listen 127.0.0.1:7047 --ca certs/ca.pem --key $NKEY > logs/notary.log 2>&1 & pids+=($!); sleep 0.7
-NPUB=$(grep -o '0x[0-9a-f]\{66\}' logs/notary.log | head -1); [ -n "$NPUB" ] || fail "notary key"
+./target/release/notary --listen 127.0.0.1:7047 --ca certs/ca.pem --key $NKEY > logs/notary.log 2>&1 & pids+=($!)
+NPUB=""; for _ in $(seq 50); do NPUB=$(grep -o '0x[0-9a-f]\{66\}' logs/notary.log | head -1 || true); [ -n "$NPUB" ] && break; sleep 0.2; done  # cold start can exceed 1 s
+[ -n "$NPUB" ] || fail "notary key"
 echo "notary key $NPUB"
 
-prove() { # $1 out file, $2 log suffix; prints totalMs. Retried once: MPC can deadlock under CPU contention (150 s guard).
-  local attempt
-  for attempt in 1 2; do
-    if timeout 150 ./target/release/prove --notary 127.0.0.1:7047 --server 127.0.0.1:8443 --server-name vendor.fermata.test --ca certs/ca.pem --method POST --path /v1/quote --body '{"symbol":"BTC-USD"}' --call-id $CALL --out "$1" > "logs/prove-$2.json" 2> "logs/prove-$2.log"; then
+prove() { # $1 out file, $2 log suffix; prints totalMs. A healthy run takes ~2 s, but an MPC session occasionally
+  local attempt  # deadlocks (no progress, no output), so each attempt gets a 30 s guard and up to 3 tries.
+  for attempt in 1 2 3; do
+    if timeout 30 ./target/release/prove --notary 127.0.0.1:7047 --server 127.0.0.1:8443 --server-name vendor.fermata.test --ca certs/ca.pem --method POST --path /v1/quote --body '{"symbol":"BTC-USD"}' --call-id $CALL --out "$1" > "logs/prove-$2.json" 2> "logs/prove-$2.log"; then
       jq -r .totalMs "logs/prove-$2.json"; return 0
     fi
     echo "prove attempt $attempt failed (see logs/prove-$2.log)" >&2
