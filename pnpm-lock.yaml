@@ -24,6 +24,8 @@ importers:
         specifier: ^2.56.8
         version: 2.56.8(typescript@5.9.3)
 
+  apps/vendor: {}
+
   packages/sdk:
     dependencies:
       viem:

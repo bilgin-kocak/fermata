@@ -15,6 +15,7 @@ cache/
 storage/
 artifacts/
 vendor/
+!apps/vendor/
 *.tlsn
 *.tlsn.*
 
