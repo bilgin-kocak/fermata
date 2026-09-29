@@ -1,0 +1,20 @@
+{
+  "port": 4300,
+  "realm": "localhost",
+  "rpc": "https://rpc.moderato.tempo.xyz",
+  "escrow": "0x<FermataEscrow address from packages/sdk/src/deployments.json>",
+  "attestorUrl": "http://127.0.0.1:7048",
+  "storageDir": "storage/calls",
+  "sweepIntervalMs": 10000,
+  "services": [
+    {
+      "serviceId": "0x<vendor address><12-byte label> (printed by pnpm service:register)",
+      "upstream": "https://vendor.fermata.test:8443",
+      "examplePath": "/v1/quote?symbol=BTC-USD",
+      "summary": "BTC/ETH/SOL spot quote",
+      "forwardHeaders": ["content-type", "accept"],
+      "upstreamAuth": { "header": "Authorization", "env": "VENDOR_UPSTREAM_TOKEN" },
+      "tempo": { "amount": "0.01", "recipient": "0x<vendor payout address>" }
+    }
+  ]
+}
