@@ -131,8 +131,12 @@ async fn prove_ok(req: &ProveRequest) -> Vec<u8> {
         .await
         .expect("prove");
     println!(
-        "proved {} in {} ms ({} attempt(s))",
-        req.connect, out.prove_ms, out.attempts
+        "proved {} in {} ms ({} attempt(s)), MPC traffic {} B sent / {} B received",
+        req.connect, out.prove_ms, out.attempts, out.notary_bytes.sent, out.notary_bytes.received
+    );
+    assert!(
+        out.notary_bytes.sent > 100_000 && out.notary_bytes.received > 100_000,
+        "MPC traffic not counted"
     );
     out.presentation
 }
@@ -359,6 +363,19 @@ async fn attestor_end_to_end() {
         request_hash(&sid_ok, "GET", TARGET, b"")
     );
     assert_eq!(delivered.verdict.presentation_hash, eip712::keccak(&p_ok));
+
+    // offline re-verification recomputes exactly what the verdict committed to
+    let rv = verify::reverify(&p_ok, &roots, call_ok, Some(sid_ok), Some(&predicate)).unwrap();
+    assert_eq!(rv["outcome"], "DELIVERED");
+    assert_eq!(rv["requestHash"], hex0x(&delivered.verdict.request_hash));
+    assert_eq!(
+        rv["presentationHash"],
+        hex0x(&delivered.verdict.presentation_hash)
+    );
+    assert_eq!(rv["responseHash"], hex0x(&delivered.verdict.response_hash));
+    assert_eq!(rv["originHash"], hex0x(&svc_ok.origin_hash));
+    assert_eq!(rv["callHeaderMatches"], true);
+    assert!(!rv["request"].as_str().unwrap().contains("sk_live"));
 
     let failed_500 = attest(p_500, call_500).await.expect("500 attests");
     assert_eq!(failed_500.verdict.outcome, OUTCOME_FAILED);

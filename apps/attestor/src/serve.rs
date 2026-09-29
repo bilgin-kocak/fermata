@@ -3,7 +3,8 @@
 //!   GET  /healthz                     → { ok, signer, escrow, chainId, notary, predicates }
 //!   POST /v1/prove   ProveBody        → prove only; stores storage/presentations/<callId>.tlsn
 //!   POST /v1/verify  { callId }       → verify the stored presentation → signed verdict
-//!   POST /v1/attest  ProveBody        → prove, then verify → { prove, verdict }
+//!   POST /v1/attest  ProveBody        → prove, then verify → { prove, verdict, response }
+//!   POST /v1/reverify { callId, serviceId?, predicateHash? } → offline re-check (no key, no chain)
 //!   GET  /v1/presentations/<callId>   → the presentation bytes (for anyone to re-verify offline)
 //!
 //! Errors: 400 bad input; 422 { check, detail } when a binding check fails (no verdict);
@@ -30,13 +31,14 @@ use crate::{
     config::PredicateStore,
     eip712::{self, Domain},
     hashes::{Origin, hex0x, parse_hex32},
-    prove::{self, ProveOutput, ProveRequest},
     verify::{self, VerifyError},
 };
 
 pub struct State {
     pub chain: RpcChain,
     pub roots: Vec<CertificateDer>,
+    /// PEM file of `roots` (passed to the per-attempt `prove` child).
+    pub ca_path: PathBuf,
     pub notary: String,
     pub predicates: PredicateStore,
     pub key: [u8; 32],
@@ -74,6 +76,15 @@ struct VerifyBody {
     call_id: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReverifyBody {
+    call_id: String,
+    service_id: Option<String>,
+    /// Recompute the outcome with the predicate registered under this hash (content-addressed store).
+    predicate_hash: Option<String>,
+}
+
 /// Splits `https://host[:port]/path?query` into the origin and the origin-form target.
 pub fn split_url(url: &str) -> Result<(Origin, String)> {
     let rest = url
@@ -92,10 +103,10 @@ impl State {
         self.storage.join(format!("{}.tlsn", hex0x(call_id)))
     }
 
-    async fn prove(
-        &self,
-        body: &ProveBody,
-    ) -> Result<(ProveOutput, [u8; 32]), (StatusCode, Value)> {
+    /// Proves one call. Each attempt runs `fermata-attest prove` as a fresh child process: in a
+    /// long-lived process MPC setup stalls far more often (FACTS §15.2/§15.4), and killing a child
+    /// also frees whatever a stalled session holds. The vendor is contacted only after setup.
+    async fn prove(&self, body: &ProveBody) -> Result<(Value, [u8; 32]), (StatusCode, Value)> {
         let bad = |e: anyhow::Error| {
             (
                 StatusCode::BAD_REQUEST,
@@ -103,49 +114,125 @@ impl State {
             )
         };
         let call_id = parse_hex32(&body.call_id).map_err(bad)?;
-        let (origin, target) = split_url(&body.url).map_err(bad)?;
+        let (origin, _) = split_url(&body.url).map_err(bad)?;
         let authority = format!("{}:{}", origin.host, origin.port);
-        let request = ProveRequest {
-            notary: self.notary.clone(),
-            connect: self.resolve.get(&authority).cloned().unwrap_or(authority),
-            origin,
-            roots: self.roots.clone(),
-            method: body.method.clone(),
-            target,
-            headers: body
-                .headers
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            body: body.body.clone().into_bytes(),
-            call_id,
-            max_sent: self.max_sent,
-            max_recv: self.max_recv,
-            redact: prove::default_redactions(),
-            setup_timeout: self.attempt_timeout / 3,
-        };
-        let _guard = self.prove_lock.lock().await;
-        let out = prove::prove(&request, self.attempts, self.attempt_timeout)
-            .await
-            .map_err(|e| {
-                error!("callId {}: no transcript: {e:#}", body.call_id);
-                (
-                    StatusCode::BAD_GATEWAY,
-                    json!({ "error": "no-transcript", "detail": format!("{e:#}") }),
-                )
-            })?;
-        let path = self.presentation_path(&call_id);
         tokio::fs::create_dir_all(&self.storage)
             .await
             .map_err(|e| internal(e.into()))?;
-        tokio::fs::write(&path, &out.presentation)
+        let path = self.presentation_path(&call_id);
+        let tmp = self.storage.join(format!(".{}.tmp", hex0x(&call_id)));
+        let body_file = self.storage.join(format!(".{}.body", hex0x(&call_id)));
+        tokio::fs::write(&body_file, body.body.as_bytes())
+            .await
+            .map_err(|e| internal(e.into()))?;
+        let exe = std::env::current_exe().map_err(|e| internal(e.into()))?;
+
+        let _guard = self.prove_lock.lock().await;
+        let started = std::time::Instant::now();
+        let mut last = String::from("no attempt made");
+        let mut result = None;
+        for attempt in 1..=self.attempts.max(1) {
+            let mut cmd = tokio::process::Command::new(&exe);
+            cmd.arg("prove")
+                .args(["--notary", &self.notary])
+                .arg("--ca")
+                .arg(&self.ca_path)
+                .args([
+                    "--url",
+                    &body.url,
+                    "--method",
+                    &body.method,
+                    "--call-id",
+                    &body.call_id,
+                ])
+                .arg("--body")
+                .arg(format!("@{}", body_file.display()))
+                .arg("--out")
+                .arg(&tmp)
+                .args(["--attempts", "1"])
+                .args([
+                    "--attempt-timeout-secs",
+                    &self.attempt_timeout.as_secs().to_string(),
+                ])
+                .args([
+                    "--max-sent",
+                    &self.max_sent.to_string(),
+                    "--max-recv",
+                    &self.max_recv.to_string(),
+                ])
+                .env("RUST_LOG", "error")
+                .env("RUST_BACKTRACE", "0")
+                .env("RUST_LIB_BACKTRACE", "0")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            if let Some(connect) = self.resolve.get(&authority) {
+                cmd.arg("--resolve").arg(format!("{authority}={connect}"));
+            }
+            for (k, v) in &body.headers {
+                cmd.arg("-H").arg(format!("{k}: {v}"));
+            }
+            let child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => return Err(internal(e.into())),
+            };
+            match tokio::time::timeout(
+                self.attempt_timeout + Duration::from_secs(5),
+                child.wait_with_output(),
+            )
+            .await
+            {
+                Ok(Ok(out)) if out.status.success() => {
+                    match serde_json::from_slice::<Value>(&out.stdout) {
+                        Ok(mut v) => {
+                            v["attempts"] = json!(attempt);
+                            v["proveMs"] = json!(started.elapsed().as_millis() as u64);
+                            result = Some(v);
+                            break;
+                        }
+                        Err(e) => last = format!("prove attempt {attempt}: unreadable output: {e}"),
+                    }
+                }
+                Ok(Ok(out)) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    let line = err
+                        .lines()
+                        .find(|l| l.starts_with("Error:"))
+                        .unwrap_or(err.trim());
+                    last = format!(
+                        "prove attempt {attempt}: {}",
+                        line.trim_start_matches("Error: ")
+                            .replace("prove attempt 1 ", "")
+                            .replace("prove attempt 1: ", "")
+                    );
+                }
+                Ok(Err(e)) => last = format!("prove attempt {attempt}: {e}"),
+                Err(_) => {
+                    last = format!(
+                        "prove attempt {attempt}: no result after {:?}",
+                        self.attempt_timeout
+                    )
+                }
+            }
+            tracing::warn!("callId {}: {last}", body.call_id);
+        }
+        let _ = tokio::fs::remove_file(&body_file).await;
+        let Some(out) = result else {
+            error!("callId {}: no transcript: {last}", body.call_id);
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": "no-transcript", "detail": last }),
+            ));
+        };
+        tokio::fs::rename(&tmp, &path)
             .await
             .map_err(|e| internal(e.into()))?;
         info!(
-            "callId {}: proved in {} ms, {} bytes → {}",
+            "callId {}: proved in {} ms ({} attempt(s)) → {}",
             body.call_id,
-            out.prove_ms,
-            out.presentation_bytes,
+            out["proveMs"],
+            out["attempts"],
             path.display()
         );
         Ok((out, call_id))
@@ -215,6 +302,60 @@ fn proved_response(presentation: &[u8], roots: &[CertificateDer]) -> Value {
     }
 }
 
+impl State {
+    /// Offline re-verification of a stored presentation (no chain, no key), for anyone re-checking a
+    /// verdict: recomputed hashes, transcript, outcome.
+    async fn reverify(&self, body: &ReverifyBody) -> Result<Value, (StatusCode, Value)> {
+        let bad = |e: anyhow::Error| {
+            (
+                StatusCode::BAD_REQUEST,
+                json!({ "error": format!("{e:#}") }),
+            )
+        };
+        let call_id = parse_hex32(&body.call_id).map_err(bad)?;
+        let service_id = body
+            .service_id
+            .as_deref()
+            .map(parse_hex32)
+            .transpose()
+            .map_err(bad)?;
+        let predicate = match &body.predicate_hash {
+            Some(h) => Some(
+                self.predicates
+                    .get(&parse_hex32(h).map_err(bad)?)
+                    .ok_or_else(|| {
+                        (
+                            StatusCode::NOT_FOUND,
+                            json!({ "error": format!("no predicate for {h}") }),
+                        )
+                    })?,
+            ),
+            None => None,
+        };
+        let bytes = tokio::fs::read(self.presentation_path(&call_id))
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::NOT_FOUND,
+                    json!({ "error": "no presentation stored for this callId" }),
+                )
+            })?;
+        verify::reverify(
+            &bytes,
+            &self.roots,
+            call_id,
+            service_id,
+            predicate.as_deref(),
+        )
+        .map_err(|v| {
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "error": "presentation-invalid", "check": v.check, "detail": v.detail }),
+            )
+        })
+    }
+}
+
 fn internal(e: anyhow::Error) -> (StatusCode, Value) {
     error!("{e:#}");
     (
@@ -264,7 +405,7 @@ async fn route(
         })),
         (Method::POST, "/v1/prove") => match parse::<ProveBody>(req).await {
             Ok(body) => state.prove(&body).await.map(|(out, call_id)| {
-                json!({ "prove": out, "presentationHash": hex0x(&eip712::keccak(&out.presentation)), "callId": hex0x(&call_id) })
+                json!({ "presentationHash": out["presentationHash"], "prove": out, "callId": hex0x(&call_id) })
             }),
             Err(e) => Err(e),
         },
@@ -275,10 +416,14 @@ async fn route(
             },
             Err(e) => Err(e),
         },
+        (Method::POST, "/v1/reverify") => match parse::<ReverifyBody>(req).await {
+            Ok(body) => state.reverify(&body).await,
+            Err(e) => Err(e),
+        },
         (Method::POST, "/v1/attest") => match parse::<ProveBody>(req).await {
             Ok(body) => match state.prove(&body).await {
                 Ok((out, call_id)) => state.verify(call_id).await.map(|mut v| {
-                    v["prove"] = serde_json::to_value(&out).unwrap();
+                    v["prove"] = out;
                     v
                 }),
                 Err(e) => Err(e),

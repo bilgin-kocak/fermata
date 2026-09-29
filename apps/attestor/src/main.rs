@@ -11,9 +11,7 @@ use fermata_attest::{
     chain::RpcChain,
     config::{PredicateStore, load_roots},
     eip712::{self, Domain},
-    hashes::{
-        Origin, hex0x, notary_key_hash, parse_hex20, parse_hex32, predicate_hash, request_hash,
-    },
+    hashes::{Origin, hex0x, notary_key_hash, parse_hex20, parse_hex32, predicate_hash},
     notary,
     predicate::Predicate,
     prove::{self, ProveRequest},
@@ -335,6 +333,7 @@ async fn main() -> Result<()> {
             let state = State {
                 chain,
                 roots: load_roots(&net.ca)?,
+                ca_path: net.ca.clone(),
                 notary: net.notary.clone(),
                 predicates,
                 key: parse_hex32(&signer)?,
@@ -400,70 +399,32 @@ fn offline_check(
         "--offline takes exactly one --predicate file"
     );
     let predicate_bytes = std::fs::read(&predicates[0])?;
-    let predicate: Predicate = serde_json::from_slice(&predicate_bytes)?;
-    let v = verify::verify_presentation(bytes, roots)?;
-    let origin = v.origin()?;
+    let service_id = service_id.map(|s| parse_hex32(&s)).transpose()?;
+    let mut result = verify::reverify(bytes, roots, call_id, service_id, Some(&predicate_bytes))?;
     let mut mismatches = Vec::new();
-    let mut compare = |name: &str, expected: &Option<String>, actual: &[u8; 32]| -> Result<()> {
-        if let Some(e) = expected
-            && parse_hex32(e)? != *actual
-        {
-            mismatches.push(format!(
-                "{name}: expected {e}, presentation gives {}",
-                hex0x(actual)
-            ));
+    for (name, expected) in [
+        ("notaryKeyHash", &expected_nk),
+        ("originHash", &expected_origin),
+        ("requestHash", &expected_rh),
+    ] {
+        if let Some(e) = expected {
+            let actual = result[name].as_str().unwrap_or_default().to_string();
+            if parse_hex32(e)? != parse_hex32(&actual).unwrap_or_default() {
+                mismatches.push(format!("{name}: expected {e}, presentation gives {actual}"));
+            }
         }
-        Ok(())
-    };
-    compare(
-        "notaryKeyHash",
-        &expected_nk,
-        &notary_key_hash(&v.notary_key),
-    )?;
-    compare("originHash", &expected_origin, &origin.hash())?;
-    let rh = match &service_id {
-        Some(s) => Some(request_hash(
-            &parse_hex32(s)?,
-            &v.request.method,
-            &v.request.target,
-            &v.request.body,
-        )),
-        None => None,
-    };
-    if let Some(rh) = &rh {
-        compare("requestHash", &expected_rh, rh)?;
     }
-    let call_ok = v
-        .call_header()
-        .is_some_and(|h| h.eq_ignore_ascii_case(&hex0x(&call_id)));
-    if !call_ok {
+    if !result["callHeaderMatches"].as_bool().unwrap_or(false) {
         mismatches.push(format!(
-            "X-Fermata-Call {:?} is not callId {}",
-            v.call_header(),
+            "X-Fermata-Call {} is not callId {}",
+            result["callHeader"],
             hex0x(&call_id)
         ));
     }
-    let (outcome, failures) = verify::decide(&v, &predicate);
-    let result = json!({
-        "offline": true,
-        "ok": mismatches.is_empty(),
-        "mismatches": mismatches,
-        "outcome": verify::outcome_name(outcome),
-        "failures": failures,
-        "presentationHash": hex0x(&eip712::keccak(bytes)),
-        "responseHash": hex0x(&eip712::keccak(&v.received)),
-        "predicateHash": hex0x(&predicate_hash(&predicate_bytes)),
-        "requestHash": rh.map(|h| hex0x(&h)),
-        "notaryKey": hex0x(&v.notary_key),
-        "notaryKeyHash": hex0x(&notary_key_hash(&v.notary_key)),
-        "origin": origin.canonical(),
-        "originHash": hex0x(&origin.hash()),
-        "sessionTime": v.time,
-        "redactedRanges": v.redacted,
-        "request": String::from_utf8_lossy(&v.sent),
-        "response": String::from_utf8_lossy(&v.received),
-    });
-    if !call_ok || !result["ok"].as_bool().unwrap_or(false) {
+    result["offline"] = json!(true);
+    result["ok"] = json!(mismatches.is_empty());
+    result["mismatches"] = json!(mismatches);
+    if !mismatches.is_empty() {
         eprintln!("{}", serde_json::to_string_pretty(&result)?);
         bail!("offline verification found mismatches");
     }

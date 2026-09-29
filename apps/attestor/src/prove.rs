@@ -89,10 +89,18 @@ pub struct ProveOutput {
     pub len_received: usize,
     pub redacted_ranges: Vec<(usize, usize)>,
     pub notary_key: String,
+    /// MPC-TLS traffic between prover and notary for this session.
+    pub notary_bytes: NotaryBytes,
     pub presentation_bytes: usize,
     pub attempts: u32,
     /// Wall-clock time including failed attempts.
     pub prove_ms: u128,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct NotaryBytes {
+    pub sent: u64,
+    pub received: u64,
 }
 
 /// Runs `prove_once` up to `attempts` times, each bounded by `timeout`. Every failure means there
@@ -157,6 +165,54 @@ pub fn complement(len: usize, holes: &[Range<usize>]) -> Vec<Range<usize>> {
     out
 }
 
+/// Counts the bytes a socket reads and writes (the MPC traffic between prover and notary).
+struct Counting<T> {
+    inner: T,
+    read: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    written: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl<T: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for Counting<T> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let r = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
+        let n = (buf.filled().len() - before) as u64;
+        self.read.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        r
+    }
+}
+
+impl<T: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for Counting<T> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let r = std::pin::Pin::new(&mut self.inner).poll_write(cx, buf);
+        if let std::task::Poll::Ready(Ok(n)) = &r {
+            self.written
+                .fetch_add(*n as u64, std::sync::atomic::Ordering::Relaxed);
+        }
+        r
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 /// Aborts a spawned task when dropped, so a timed-out attempt stops its MPC work instead of
 /// competing with the retry for CPU.
 struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
@@ -174,7 +230,13 @@ pub async fn prove_once(req: &ProveRequest) -> Result<ProveOutput> {
         .await
         .with_context(|| format!("connecting to notary {}", req.notary))?;
     notary_socket.set_nodelay(true)?;
-    let (driver, mut handle) = Session::new(notary_socket.compat()).split();
+    let (bytes_read, bytes_written) = (std::sync::Arc::default(), std::sync::Arc::default());
+    let counted = Counting {
+        inner: notary_socket,
+        read: std::sync::Arc::clone(&bytes_read),
+        written: std::sync::Arc::clone(&bytes_written),
+    };
+    let (driver, mut handle) = Session::new(counted.compat()).split();
     let mut driver_task = AbortOnDrop(tokio::spawn(driver));
 
     let tls_config = TlsClientConfig::builder()
@@ -334,6 +396,10 @@ pub async fn prove_once(req: &ProveRequest) -> Result<ProveOutput> {
         len_received: len_recv,
         redacted_ranges: holes.iter().map(|r| (r.start, r.end)).collect(),
         notary_key: hex0x(&attestation.body.verifying_key().data),
+        notary_bytes: NotaryBytes {
+            sent: bytes_written.load(std::sync::atomic::Ordering::Relaxed),
+            received: bytes_read.load(std::sync::atomic::Ordering::Relaxed),
+        },
         attempts: 1,
         prove_ms: 0,
     })
