@@ -1,6 +1,6 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-29**: Milestones 0, S, 1, 2 and **3 done locally** — escrow contract, and the
+Status as of **2026-09-29**: Milestones 0, S, 1, 2, 3 and **4 done locally** — escrow contract, and the
 Rust attestor proving the demo vendor with TLSNotary, binding the proof to the on-chain hold and
 signing verdicts that the escrow settles (live on Anvil's Tempo emulation). Every Moderato step is
 **DEFERRED** because `rpc.moderato.tempo.xyz` is refused (HTTP 403) by the build environment's
@@ -15,7 +15,7 @@ network policy. 13 days remain to 2026-10-12; freeze on **2026-10-09**.
 | 1 Escrow contract | 2 d | done in 1 d (09-24) | 09-24 | local GREEN; Moderato deploy deferred (RPC blocked) |
 | 2 Attestor | 3–4 d | done in 1 d (09-29) | 09-29 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
 | 3 Gateway + method + SDK | 3 d | done in 1 d (09-29) | 09-29 | unchanged; receipt emission mechanism already found |
-| 4 Vendor, agent, dashboard | 3 d | 3 d | 10-05 → 10-07 | unchanged; cut dashboard scope first if slipping |
+| 4 Vendor, agent, dashboard | 3 d | done in 1 d (09-29) | 09-29 | unchanged; cut dashboard scope first if slipping |
 | 5 Submission polish | 2 d | 1.5 d | 10-08 → 10-09 | README trust-model text already drafted in FACTS |
 | **Total** | 14.5–16 d | **≈ 16 d** | freeze 10-09 | ≈ 1 day of slack |
 
@@ -202,14 +202,30 @@ Acceptance:
 - [ ] Moderato e2e and validator payment phase — DEFERRED (RPC 403 here).
 - `docker-compose.yml` + `apps/attestor/Dockerfile` written, not validated (no Docker daemon).
 
-## Milestone 4 — demo vendor, agent, dashboard (3 d)
+## Milestone 4 — demo agent, dashboard, `demo:cases`, `demo:load` (done locally 2026-09-29)
 
-Vendor per FACTS §12.4 with `CHAOS_RATE`; agent loop with the table and totals; dashboard with
-live events, proof drawer (re-verify via the attestor), reconciliation by `TransferWithMemo`
-memo. `pnpm demo:cases` (definition of done) and `pnpm demo:load --calls 100`. Localhost
-measurement (FACTS §15: 1.2 s per in-process session) extrapolates to ≈ 2–3 min for 100 calls
-plus on-chain time; if the two-process variant is slower than the video allows, record the run
-in advance and show one live call, as the prompt permits.
+Bilgin's decisions: Vite + React dashboard served by the gateway at `/dashboard`; random
+`CHAOS_RATE=0.03` for the load test.
+
+Acceptance:
+- [x] `bash scripts/demo-stack.sh up|down --chain anvil|moderato`: four vendors (3 % chaos, ok,
+  always-500, never-answers), notary, attestor, gateway + dashboard; `out/demo/stack.json`.
+- [x] `pnpm demo:cases` (definition of done): release / verified-failure refund / timeout refund,
+  each checked on-chain, re-verified offline and reconciled by memo; pass/fail table with explorer
+  links on Moderato — **3/3 PASS on Anvil**.
+- [x] `pnpm demo:agent --calls N`: the brief's table (callId, outcome, txHash) and totals.
+- [x] `pnpm demo:load --calls 100`: 97/3, 226.8 s, prove p50 1.13 s, 65.9 MB MPC traffic per call
+  (FACTS §15.4).
+- [x] Dashboard: live feed (calls + on-chain Held/Released/Refunded), per-call drawer (revealed
+  transcript with auth masked, notary key, verdict signature, download proof, **re-verify offline**
+  with recomputed vs on-chain hashes), Reconciliation tab (movements by memo, ✓ against the
+  outcome), Services tab; light/dark, phone layout, fermata sign in the header. Screenshots in
+  `docs/img/`.
+- [ ] `demo:cases` / `demo:load` on Moderato — DEFERRED (RPC 403 here). Same commands with
+  `--chain moderato` once the host is allowed.
+
+Changes forced by measurements: the attestor proves in a child process per attempt (MPC setup
+stalls in the long-lived server); `tempoChain` sets `blockTime: 1000` (receipt polling).
 
 ## Milestone 5 — submission polish (1.5 d)
 
