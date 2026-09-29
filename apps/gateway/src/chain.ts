@@ -9,7 +9,7 @@ import {
   type Transport,
   type WalletClient,
 } from 'viem'
-import { fermataEscrowAbi, getHold, getService, type Verdict } from '@fermata/sdk'
+import { fermataEscrowAbi, getHold, getService, reconcile, type Verdict } from '@fermata/sdk'
 
 export type TxResult = { ok: true; txHash: Hex } | { ok: false; error: string; txHash?: Hex }
 
@@ -22,6 +22,19 @@ export interface GatewayChain {
   now(): Promise<bigint>
   settle(callId: Hex, verdict: Verdict, signature: Hex): Promise<TxResult>
   claimTimeout(callId: Hex): Promise<TxResult>
+  /** Escrow Held/Released/Refunded events from `fromBlock`, oldest first. */
+  events(fromBlock: bigint): Promise<EscrowEvent[]>
+  /** The call's TIP-20 movements, by memo (SDK `reconcile`). */
+  movements(token: Address, callId: Hex, fromBlock: bigint): Promise<{ token: Address; from: Address; to: Address; amount: bigint; txHash: Hex; blockNumber: bigint }[]>
+}
+
+export type EscrowEvent = {
+  event: 'Held' | 'Released' | 'Refunded'
+  callId: Hex
+  serviceId: Hex
+  blockNumber: bigint
+  txHash: Hex
+  args: Record<string, unknown>
 }
 
 /** Attestor verdict JSON (snake_case, from Rust) → the escrow's Verdict struct. */
@@ -90,6 +103,27 @@ export class ViemChain implements GatewayChain {
 
   settle(callId: Hex, verdict: Verdict, signature: Hex) {
     return this.write('settle', [callId, verdict, signature])
+  }
+
+  async events(fromBlock: bigint): Promise<EscrowEvent[]> {
+    const logs = await this.client.getContractEvents({ address: this.escrow, abi: fermataEscrowAbi, fromBlock, toBlock: 'latest' })
+    return logs
+      .filter((l) => ['Held', 'Released', 'Refunded'].includes(l.eventName))
+      .map((l) => {
+        const args = l.args as Record<string, unknown>
+        return {
+          event: l.eventName as EscrowEvent['event'],
+          callId: args.callId as Hex,
+          serviceId: args.serviceId as Hex,
+          blockNumber: l.blockNumber,
+          txHash: l.transactionHash,
+          args,
+        }
+      })
+  }
+
+  movements(token: Address, callId: Hex, fromBlock: bigint) {
+    return reconcile(this.client, { token, callId, fromBlock })
   }
 
   claimTimeout(callId: Hex) {

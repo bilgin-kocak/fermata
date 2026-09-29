@@ -1,0 +1,23 @@
+{
+  "name": "@fermata/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fermata dashboard: live escrow feed, per-call proof drawer with offline re-verify, reconciliation by memo",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.6"
+  }
+}

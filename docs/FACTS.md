@@ -449,3 +449,29 @@ id/realm/expiry, realm = hostname, `[tempo]` recipient/currency/amount valid, ma
 to create and fund testnet wallet") — it needs the Moderato faucet, refused here. As predicted
 (§11) the validator runs no method-specific checks and no payment for `fermata`; `fermata` is
 covered by the generic challenge and error-handling checks and by the e2e test.
+
+### 15.4 Demo and 100-call load test (Milestone 4, 2026-09-29)
+
+`bash scripts/demo-stack.sh up --chain anvil` then `pnpm demo:load --calls 100`: a fresh agent
+buys 100 quotes sequentially through the gateway (`fermata` method) from the demo vendor with
+`CHAOS_RATE=0.03`; vendor, notary, attestor, gateway and Anvil (Tempo emulation) are separate
+processes on one 4-vCPU box.
+
+| Measurement | Value |
+|---|---|
+| Outcomes | **97 delivered / 3 refunded** (random 3 % vendor failures: 500 or truncated JSON), 0 errors, 0 awaiting timeout |
+| Wall-clock, 100 calls | **226.8 s** (≈ 2.3 s per call incl. hold tx, proof, verdict, settle tx) |
+| Per call, agent's view | p50 2.15 s, p90 2.44 s, max 6.5 s |
+| Prove time (MPC-TLS + attestation) | p50 1.13 s, p90 1.39 s, max 5.4 s (one stall retried), mean 1.35 s |
+| **MPC traffic prover ↔ notary** | **65.9 MB per call** (≈ 62 MB sent + 3.9 MB received); 6.6 GB for 100 calls |
+| Gas per call | hold ≈ 345k, settle ≈ 107k (Anvil-Tempo) |
+| Fees | escrow fee 0.00485 USD (0.5 % of 0.97 USD released); agent's own gas ≈ 0.057 USD for 100 holds at Anvil's decaying base fee |
+
+Proving is now done in a **fresh child process per attempt** (`serve` spawns `fermata-attest
+prove`): inside the long-lived `serve` process MPC setup stalled on most sessions in the demo stack
+(5 of 7 in one run), a fresh process rarely stalls (1 retry in 100 calls above). Receipt polling
+matters too: with no `blockTime` on the chain definition viem polls every 4 s; with `blockTime:
+1000` (as viem's own `tempoModerato`) per-call latency fell from ≈ 5.5 s to ≈ 1.7 s.
+
+`pnpm demo:cases --chain anvil`: 3/3 PASS (release: vendor 9,950 + treasury 50, proof re-verified
+offline, reconciled by memo; verified-failure refund; timeout refund by the gateway sweeper).

@@ -59,6 +59,18 @@ class FakeChain implements GatewayChain {
     this.holds.get(callId.toLowerCase())!.status = 4
     return { ok: true, txHash: keccak256(toHex(`timeout-${callId}`)) }
   }
+  async events(_: bigint) {
+    return this.settled.map((x) => ({ event: x.outcome === 1 ? 'Released' : 'Refunded', callId: x.callId, serviceId: sid, blockNumber: 2n, txHash: keccak256(toHex(`settle-${x.callId}`)), args: {} })) as never
+  }
+  async movements(_: Address, callId: Hex) {
+    const tx = keccak256(toHex('m'))
+    const hold = { token, from: agent, to: escrow, amount: 10_000n, txHash: tx, blockNumber: 1n }
+    const s = this.settled.find((x) => x.callId === callId)
+    if (!s) return [hold]
+    return s.outcome === 1
+      ? [hold, { ...hold, from: escrow, to: vendor, amount: 9_950n }, { ...hold, from: escrow, to: signer, amount: 50n }]
+      : [hold, { ...hold, from: escrow, to: agent, amount: 10_000n }]
+  }
   /** What the `fermata` method reads to validate a credential. */
   publicClient() {
     return {
@@ -83,6 +95,9 @@ class FakeAttestor implements Attestor {
   }
   async health() {
     return { signer, escrow, chainId: 42431 }
+  }
+  async reverify(input: { callId: Hex }) {
+    return { presentationHash: keccak256(toHex(`presentation-${input.callId}`)), requestHash: null, originHash: originHash(upstream), notaryKeyHash: `0x${'55'.repeat(32)}`, predicateHash: `0x${'44'.repeat(32)}`, outcome: 'DELIVERED', callHeaderMatches: true } as never
   }
   async presentation(callId: Hex) {
     return callId.startsWith('0x') ? new Uint8Array([1, 2, 3]) : undefined
@@ -259,6 +274,17 @@ describe('gateway', () => {
     chain.verifier = signer
     chain.origin = originHash('https://evil.example')
     await expect(build()).rejects.toThrow(/not the registered origin/)
+  })
+
+  it('reconciles a released call by memo and lists escrow events', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    const callId = receiptOf(await agentFetch()(`/s/${sid}/v1/quote?symbol=BTC-USD`)).callId as Hex
+    const rec = (await (await gw.app.request(`${BASE}/reconcile/${callId}`)).json()) as { match: boolean; movements: unknown[] }
+    expect(rec.match).toBe(true)
+    expect(rec.movements).toHaveLength(3)
+    const events = (await (await gw.app.request(`${BASE}/events?since=0`)).json()) as { event: string; callId: string }[]
+    expect(events).toEqual([expect.objectContaining({ event: 'Released', callId })])
+    expect(await (await gw.app.request(`${BASE}/info`)).json()).toMatchObject({ chainId: 42431, escrow })
   })
 
   it('serves services, proofs, discovery', async () => {

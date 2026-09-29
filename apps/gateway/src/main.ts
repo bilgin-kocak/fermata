@@ -51,6 +51,8 @@ const gateway = await createGateway({
   attestor: new HttpAttestor(config.attestorUrl),
   store: new CallStore(config.storageDir),
   secretKey: required('GATEWAY_SECRET_KEY'),
+  dashboardDir: process.env.GATEWAY_DASHBOARD_DIR ?? new URL('../../dashboard/dist', import.meta.url).pathname,
+  explorer: process.env.GATEWAY_EXPLORER === undefined ? undefined : process.env.GATEWAY_EXPLORER || null,
   fetchUpstream: async (url, init) => (await undiciFetch(url, { ...(init as object), dispatcher })) as unknown as Response,
 })
 

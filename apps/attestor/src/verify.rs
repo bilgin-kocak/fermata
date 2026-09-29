@@ -417,3 +417,61 @@ pub async fn attest<C: ChainView>(
     };
     sign_verdict(verdict, failures, domain, key)
 }
+
+/// Offline re-verification (no chain, no key): what a third party recomputes from a downloaded
+/// presentation. Every hash the escrow and the verdict commit to is recomputed so the caller can
+/// compare it with the on-chain values; the outcome is recomputed when the predicate is supplied.
+pub fn reverify(
+    presentation: &[u8],
+    roots: &[CertificateDer],
+    call_id: [u8; 32],
+    service_id: Option<[u8; 32]>,
+    predicate_bytes: Option<&[u8]>,
+) -> Result<serde_json::Value, VerifyError> {
+    let v = verify_presentation(presentation, roots)?;
+    let origin = v.origin()?;
+    let request_hash = service_id.map(|s| {
+        hex0x(&request_hash(
+            &s,
+            &v.request.method,
+            &v.request.target,
+            &v.request.body,
+        ))
+    });
+    let decided = match predicate_bytes {
+        Some(bytes) => {
+            let p: Predicate = serde_json::from_slice(bytes).map_err(|e| VerifyError {
+                check: Check::Predicate,
+                detail: format!("predicate JSON: {e}"),
+            })?;
+            let (outcome, failures) = decide(&v, &p);
+            Some((
+                outcome_name(outcome),
+                failures,
+                hex0x(&predicate_hash(bytes)),
+            ))
+        }
+        None => None,
+    };
+    let call_header_matches = v
+        .call_header()
+        .is_some_and(|h| h.trim().eq_ignore_ascii_case(&hex0x(&call_id)));
+    Ok(serde_json::json!({
+        "presentationHash": hex0x(&v.presentation_hash),
+        "responseHash": hex0x(&eip712::keccak(&v.received)),
+        "requestHash": request_hash,
+        "notaryKey": hex0x(&v.notary_key),
+        "notaryKeyHash": hex0x(&notary_key_hash(&v.notary_key)),
+        "origin": origin.canonical(),
+        "originHash": hex0x(&origin.hash()),
+        "callHeader": v.call_header(),
+        "callHeaderMatches": call_header_matches,
+        "sessionTime": v.time,
+        "redactedRanges": v.redacted,
+        "outcome": decided.as_ref().map(|d| d.0),
+        "failures": decided.as_ref().map(|d| d.1.clone()),
+        "predicateHash": decided.as_ref().map(|d| d.2.clone()),
+        "request": String::from_utf8_lossy(&v.sent),
+        "response": String::from_utf8_lossy(&v.received),
+    }))
+}

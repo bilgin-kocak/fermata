@@ -20,6 +20,8 @@ export function tempoChain(rpc: string) {
   return defineChain({
     id: MODERATO.id,
     name: 'Tempo Moderato',
+    // ~1 s blocks (as viem's own tempoModerato); viem then polls receipts every 500 ms instead of 4 s.
+    blockTime: 1_000,
     nativeCurrency: { name: 'USD', symbol: 'USD', decimals: 18 },
     rpcUrls: { default: { http: [rpc] } },
     blockExplorers: { default: { name: 'Tempo Explorer', url: MODERATO.explorer } },

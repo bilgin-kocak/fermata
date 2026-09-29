@@ -21,11 +21,17 @@
     "attest:e2e:anvil": "bash scripts/e2e-attest.sh",
     "gateway:test": "pnpm -F @fermata/gateway test",
     "gateway:e2e:anvil": "bash scripts/e2e-gateway.sh",
+    "demo:up": "bash scripts/demo-stack.sh up",
+    "demo:down": "bash scripts/demo-stack.sh down",
+    "demo:cases": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/cases.ts",
+    "demo:agent": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/agent.ts",
+    "demo:load": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/agent.ts --service quote --load",
     "service:register": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/register-service.ts"
   },
   "devDependencies": {
     "@fermata/sdk": "workspace:*",
     "@types/node": "^22.19.0",
+    "mppx": "0.11.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "viem": "^2.56.8"
