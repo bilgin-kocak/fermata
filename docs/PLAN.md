@@ -1,11 +1,10 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-24**: Milestones 0 and S done; **Milestone 1 done locally** —
-`FermataEscrow` with unit, fuzz, invariant, vector and real-precompile tests, deploy script and a
-3-case round trip green on Anvil's Tempo emulation; the Moderato deploy + round trip are
-**DEFERRED** because `rpc.moderato.tempo.xyz` is still refused (HTTP 403) by the build
-environment's network policy (one command each once allowed). 18 days remain to 2026-10-12.
-Freeze (demo, video, README) on **2026-10-09**, 72 h before the deadline, per the prompt.
+Status as of **2026-09-29**: Milestones 0, S, 1 and **2 done locally** — escrow contract, and the
+Rust attestor proving the demo vendor with TLSNotary, binding the proof to the on-chain hold and
+signing verdicts that the escrow settles (live on Anvil's Tempo emulation). Every Moderato step is
+**DEFERRED** because `rpc.moderato.tempo.xyz` is refused (HTTP 403) by the build environment's
+network policy. 13 days remain to 2026-10-12; freeze on **2026-10-09**.
 
 ## Calendar
 
@@ -14,7 +13,7 @@ Freeze (demo, video, README) on **2026-10-09**, 72 h before the deadline, per th
 | 0 Facts and plan | 0.5 d | 1 d (done) | 09-23 | doc hosts blocked → read GitHub sources; built tlsn |
 | S Integration spike | 1–1.5 d | done in 1 d (09-23) | 09-23 | all local legs GREEN; Moderato legs deferred (RPC blocked) |
 | 1 Escrow contract | 2 d | done in 1 d (09-24) | 09-24 | local GREEN; Moderato deploy deferred (RPC blocked) |
-| 2 Attestor | 3–4 d | 3.5–4 d | 09-28 → 10-01 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
+| 2 Attestor | 3–4 d | done in 1 d (09-29) | 09-29 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
 | 3 Gateway + method + SDK | 3 d | 3 d | 10-02 → 10-04 | unchanged; receipt emission mechanism already found |
 | 4 Vendor, agent, dashboard | 3 d | 3 d | 10-05 → 10-07 | unchanged; cut dashboard scope first if slipping |
 | 5 Submission polish | 2 d | 1.5 d | 10-08 → 10-09 | README trust-model text already drafted in FACTS |
@@ -143,30 +142,38 @@ first hold costs ~$0.016 > the $0.01 demo price — revisit the price once Moder
 is measured; (2) Moderato unreached from this environment; (3) MPC hangs → M2 needs
 per-attempt timeouts and retries.
 
-## Milestone 2 — attestor (3.5–4 d)
+## Milestone 2 — attestor (done locally 2026-09-29)
 
-`apps/attestor` is its own cargo workspace (`rust-toolchain.toml` = 1.95.0; git deps pinned to
-`47aee45b…`; `CARGO_TARGET_DIR` shared to avoid rebuilding tlsn). Subcommands
-`prove | verify | serve | notary`.
+`apps/attestor` (`fermata-attest notary | prove | verify [--offline] | serve | hashes`), its own
+cargo workspace on Rust 1.95.0 with tlsn pinned to `47aee45b`; `apps/vendor` (Node TLS 1.2 demo
+vendor, `/v1/quote?symbol=`, `CHAOS=500|truncate|cut|hang`, `CHAOS_RATE`). Bilgin's decisions:
+hand-rolled `eth_call` (no alloy); `originHash`/`notaryKeyHash` = keccak of canonical strings;
+reveal everything except auth header values; vendor app now.
 
-Binding checks before any predicate evaluation (fail closed), the prompt's five plus two:
-1. notary key hash equals the service's `notaryKeyHash` (`keccak256(alg ‖ SEC1 bytes)`);
-2. `server_name` (case-insensitive) and the revealed `Host` header equal the registered origin,
-   with the verifier root store restricted to the service's CA (Mozilla roots for public
-   vendors via the `mozilla-certs` feature);
-3. revealed method, path-with-query and body hash recompute to the on-chain `requestHash`, with
-   every contributing byte range inside `sent_authed()`;
-4. the predicate JSON hashes to `predicateHash`;
-5. the hold is open on-chain (no verdict, deadline not passed);
-6. *(added)* the revealed `X-Fermata-Call` request header equals `callId`, so an old
-   presentation for an identical request cannot unlock a new hold;
-7. *(added)* `connection_info.time` lies inside the hold window.
-One negative test per check. No JSON-body assumption in the verifier: the predicate decides.
-`presentationHash = keccak256(bincode bytes)` (bincode 1.3.3 is part of the format). Notary
-signature algorithm `SECP256K1ETH` if `Secp256k1EthSigner` verifies under the default provider,
-else `SECP256K1`. EIP-712 signing with k256 + keccak (both already in the dependency tree; no
-alloy). Integration test against the in-process `tlsn-server-fixture` and the demo vendor;
-verdict fixture exported for the Foundry test.
+Acceptance:
+- [x] `prove` against the demo vendor over local TLS through a separate notary; `verify` pins the
+  notary key via `notaryKeyHash`, evaluates the predicate, signs the EIP-712 verdict; `--offline`
+  re-checks a downloaded presentation with no chain or key; `serve` exposes it over HTTP.
+- [x] Binding checks before any signature: notary, origin, request (incl. redaction policy),
+  predicate, hold open, plus the two added (callId header, TLS session time inside the window).
+  One negative test each, plus tampering and a no-transcript case (`tests/attest.rs`).
+- [x] Rust integration test → `contracts/test/fixtures/attest-vector.json` →
+  `AttestVector.t.sol`: the DELIVERED verdict releases, the FAILED (authenticated 500) verdict
+  refunds, a verdict cannot settle another call.
+- [x] Prove time recorded (FACTS §15.2): median 1.30 s per call, well under the 10 s alarm.
+- [x] Live: `pnpm attest:e2e:anvil` — hold → attest → settle for DELIVERED and FAILED, replayed
+  proof refused, offline re-verification against on-chain hashes, no transcript → no verdict →
+  timeout refund.
+- [ ] Moderato — DEFERRED with the rest of the chain work (RPC 403 in this environment).
+
+Deviation: no `docker-compose.yml` yet (no Docker daemon here, and the gateway it would wire up is
+Milestone 3); it lands with the gateway. Faked: nothing — M1's placeholder verdicts are replaced
+by real presentations in the e2e run (the `escrow:roundtrip` script still uses placeholders, by
+design, to test the escrow alone).
+
+Open risk: MPC setup stalls (≈ 16 % of sessions in a long-lived process, ≈ 5 % with a fresh
+process each), absorbed by a 5 s setup bound + retry; if the 100-call load test suffers, `serve`
+switches to a child process per proof.
 
 ## Milestone 3 — gateway, `fermata` method, SDK (3 d)
 

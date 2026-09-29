@@ -14,17 +14,20 @@ Vocabulary: `hold → release(proof) → refund`.
 
 ## Status
 
-Milestone 1 (escrow contract) done locally; Moderato deployment pending network access.
+Milestones 1 (escrow contract) and 2 (attestor) done locally; Moderato deployment pending network access.
 
 - [`contracts/src/FermataEscrow.sol`](contracts/src/FermataEscrow.sol): `hold → settle(verdict) | claimTimeout`,
   TIP-20 permit + `…WithMemo` transfers with memo = callId, EIP-712 verdicts.
+- [`apps/attestor`](apps/attestor): `fermata-attest` — proves the vendor's HTTPS response with TLSNotary,
+  binds it to the on-chain hold, evaluates the delivery predicate and signs the verdict.
+- [`apps/vendor`](apps/vendor): demo vendor (TLS 1.2 quote API) with failure modes.
 - [`docs/FACTS.md`](docs/FACTS.md): verified facts about Tempo, MPP and TLSNotary, with sources, dates and measurements.
 - [`docs/PLAN.md`](docs/PLAN.md): milestone plan, status and open risks.
 - [`PROMPT.md`](PROMPT.md): the build brief.
 
 ## Quickstart
 
-Requires Foundry 1.8.3, Node ≥ 22.21 and pnpm 10.
+Requires Foundry 1.8.3, Node ≥ 22.21, pnpm 10 and (for the attestor) Rust 1.95.0 via rustup.
 
 ```sh
 git submodule update --init && pnpm install
@@ -32,6 +35,8 @@ cd contracts && forge test                                  # unit, fuzz, invari
 FOUNDRY_PROFILE=tempo forge test --network tempo            # against the real TIP-20 precompile
 cd .. && pnpm sdk:test                                      # viem EIP-712 == Rust == Solidity
 pnpm escrow:e2e:anvil     # anvil --chain-id 42431: deploy + DELIVERED/FAILED/TIMEOUT round trip
+pnpm attest:test          # attestor unit + integration tests (real MPC-TLS; needs node, openssl, Rust 1.95)
+pnpm attest:e2e:anvil     # hold → TLSNotary proof → verdict → settle, every component a real process
 
 # Tempo Moderato testnet
 pnpm keys:init            # writes .env with fresh testnet keys; prints faucet commands

@@ -394,3 +394,37 @@ Reading: on localhost the published WAN figures (3.6–14.5 s per session) colla
 because the ≈ 25–30 MB of MPC setup traffic never leaves the machine. A 100-call sequential run
 extrapolates to ≈ 2–3 minutes plus on-chain time (≈ 1 s per hold/settle at 0.6 s blocks), which
 fits the video plan; the spike measures the two-process (TCP notary) variant and proxy mode.
+
+### 15.2 Attestor (Milestone 2, 2026-09-29)
+
+`apps/attestor` (`fermata-attest`), tlsn v0.1.0-alpha.15, release build, 4 vCPU; notary as a
+separate process on localhost; demo vendor `apps/vendor` (Node, TLS 1.2); `GET
+/v1/quote?symbol=BTC-USD` with an `Authorization` header (value redacted).
+
+| Measurement | Value | Conditions |
+|---|---|---|
+| Prove time per call, sessions that did not stall | **median 1.30 s**, p90 1.76 s, max 2.57 s, min 0.90 s | 42 of 50 sequential proofs from one long-lived process (`soak` test) |
+| Prove time per call, all 50 incl. retries | median 1.34 s, p90 6.5 s, max 8.1 s, mean 2.2 s | 8 stalls, each retried after the 5 s setup bound |
+| MPC setup stall rate | ≈ 16 % in one long-lived process (8/50, 5/25, 2/32); ≈ 5 % with a fresh process per proof (2/42, 0/20) | stall is inside tlsn/mpz "setting up mpc-tls", **before the vendor is contacted** → retry has no side effects |
+| Presentation size | **2,053–2,055 B** (raw commitments only, one redacted range) | request 270 B sent, 217 B received |
+| Verify + bind + predicate + sign | < 10 ms | offline part; chain reads add two `eth_call`s + one block fetch |
+| End to end on Anvil (`pnpm attest:e2e:anvil`): hold → attest → settle | attest HTTP call 1.8 s | 3 vendors, notary, `serve`, all separate processes |
+
+Brief's alarm threshold (> 10 s per call) is not reached. Stall mitigation in place: attempt
+timeout 15 s, MPC-setup timeout 5 s, 3 attempts, spawned tasks aborted when an attempt is
+dropped. Option if the Milestone 4 load test needs it: `serve` proves in a fresh child process per
+call (lower stall rate measured above).
+
+**Registration hash definitions** (Rust `hashes.rs` = TS `packages/sdk/src/hashes.ts`, shared
+vectors; Solidity recomputes `requestHash` in `AttestVector.t.sol`):
+- `originHash = keccak256("https://" + lower-case host + (":" + port if port ≠ 443))`; the host is
+  the TLS-certified server name, the port comes from the revealed `Host` header.
+- `notaryKeyHash = keccak256(33-byte compressed SEC1 notary key)` (SECP256K1ETH attestations).
+- `predicateHash = sha256(predicate bytes exactly as registered)`; the attestor looks predicates
+  up by this hash (content-addressed `--predicate` directory).
+
+**Disclosure** (tlsn at this tag only has hash commitments, and a revealed range must be covered
+by committed ranges): the prover commits the sent transcript in pieces around the values of
+`Authorization`, `Cookie`, `Proxy-Authorization` and reveals everything else; the received
+transcript is revealed in full. The verifier rejects any hidden byte outside those header values
+and any unrevealed response byte. Hidden bytes render as `*`.
