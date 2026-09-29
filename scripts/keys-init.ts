@@ -1,8 +1,9 @@
-// Creates .env from .env.example (mode 600) and fills every empty *_PRIVATE_KEY with a fresh
-// TESTNET key. Never overwrites a value that is already set, so it is safe to re-run.
+// Creates .env from .env.example (mode 600) and fills every empty *_PRIVATE_KEY (and GATEWAY_SECRET_KEY) with
+// fresh TESTNET values. Never overwrites a value that is already set, so it is safe to re-run.
 // Prints the address of every key and the faucet command for the ones that pay fees.
 //   pnpm keys:init
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { isHex, size, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { MODERATO } from '@fermata/sdk'
@@ -25,8 +26,10 @@ if (missing.length > 0) lines.push('', '# added by pnpm keys:init from .env.exam
 const created: string[] = []
 for (let i = 0; i < lines.length; i++) {
   const m = assignment.exec(lines[i]!)
-  if (!m || !m[1]!.endsWith('_PRIVATE_KEY') || m[2]!.trim() !== '') continue
-  lines[i] = `${m[1]}=${generatePrivateKey()}`
+  if (!m || m[2]!.trim() !== '') continue
+  if (m[1]!.endsWith('_PRIVATE_KEY')) lines[i] = `${m[1]}=${generatePrivateKey()}`
+  else if (m[1] === 'GATEWAY_SECRET_KEY') lines[i] = `${m[1]}=${randomBytes(32).toString('hex')}`
+  else continue
   created.push(m[1]!)
 }
 
@@ -54,6 +57,7 @@ for (const [name, value] of env) {
 
 const rpc = env.get('TEMPO_RPC_URL') || MODERATO.rpcUrl
 const payers = ['DEPLOYER_PRIVATE_KEY', 'VENDOR_PRIVATE_KEY', 'RELAYER_PRIVATE_KEY', 'AGENT_PRIVATE_KEY']
+// (NOTARY_PRIVATE_KEY and VERIFIER_PRIVATE_KEY only sign; they need no funds.)
 console.log('\nFund the fee-paying keys from the Moderato testnet faucet (the verifier needs no funds):')
 for (const name of payers) {
   const address = addresses.get(name)
