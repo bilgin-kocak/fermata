@@ -1,0 +1,5 @@
+# Spikes (spikes/*) are throwaway and deliberately NOT part of the workspace;
+# their run.sh files install with `pnpm install --ignore-workspace`.
+packages:
+  - "packages/*"
+  - "apps/*"
