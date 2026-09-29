@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { Credential, Receipt } from 'mppx'
 import { discovery } from 'mppx/hono'
 import { Mppx, tempo } from 'mppx/server'
-import { isAddressEqual, zeroAddress, type Hex, type PublicClient } from 'viem'
-import { fermataServer, originHash, requestHash } from '@fermata/sdk'
+import { isAddressEqual, parseEventLogs, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
+import { fermataEscrowAbi, fermataServer, MODERATO, originHash, requestHash } from '@fermata/sdk'
 import type { Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
@@ -22,7 +24,14 @@ export type GatewayDeps = {
   /** Upstream fetch for the unprotected `tempo` fallback (needs the vendor's CA). */
   fetchUpstream?: (url: string, init: RequestInit) => Promise<Response>
   log?: (msg: string) => void
+  /** Built dashboard (apps/dashboard/dist), served at /dashboard. */
+  dashboardDir?: string
+  /** Explorer base URL for links (Moderato: https://explore.testnet.tempo.xyz; none on Anvil). */
+  explorer?: string | null
 }
+
+/** JSON-safe copy (bigints as decimal strings). */
+const plain = <T>(v: T): unknown => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === 'bigint' ? x.toString() : x)))
 
 type Service = ServiceConfig & { price: bigint; token: Hex; window: number }
 
@@ -176,6 +185,8 @@ export async function createGateway(deps: GatewayDeps) {
       signature: result.signed.signatureBytes,
       presentationHash: result.presentationHash,
       proveMs: result.proveMs,
+      notaryBytes: result.notaryBytes,
+      signer: result.signed.signer,
     })
     record = await settleVerdict(record)
     return withFermataReceipt(r.withReceipt(provedToResponse(result.response)), record)
@@ -202,6 +213,87 @@ export async function createGateway(deps: GatewayDeps) {
     if (!bytes) return c.json({ error: 'no presentation for this call' }, 404)
     return new Response(bytes, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${id}.tlsn"` } })
   })
+  app.get('/info', (c) =>
+    c.json({
+      chainId: chain.chainId,
+      escrow: chain.escrow,
+      explorer: deps.explorer === undefined ? (deps.config.rpc.includes('moderato') ? MODERATO.explorer : null) : deps.explorer,
+      services: services.size,
+    }),
+  )
+
+  app.get('/events', async (c) => {
+    const since = BigInt(c.req.query('since') ?? '0')
+    return c.json(plain(await chain.events(since)))
+  })
+
+  const receiptLogs = async (hash?: Hex) =>
+    hash ? (await deps.publicClient.getTransactionReceipt({ hash }).catch(() => undefined))?.logs ?? [] : []
+
+  /** An accountant's view of one call: every TIP-20 movement tagged with its callId, checked against the outcome. */
+  app.get('/reconcile/:callId', async (c) => {
+    const record = await store.get(c.req.param('callId')).catch(() => undefined)
+    if (!record) return c.json({ error: 'unknown call' }, 404)
+    const svc = services.get(record.serviceId.toLowerCase())!
+    const holdReceipt = await deps.publicClient.getTransactionReceipt({ hash: record.holdTx }).catch(() => undefined)
+    const movements = await chain.movements(svc.token as Address, record.callId, holdReceipt?.blockNumber ?? 0n)
+    const eq = (a: string, b?: string) => !!b && a.toLowerCase() === b.toLowerCase()
+    const holdOk = movements.length > 0 && eq(movements[0]!.to, chain.escrow) && movements[0]!.amount === svc.price
+    const rest = movements.slice(1)
+    const settledTotal = rest.reduce((sum, m) => sum + m.amount, 0n)
+    const settled = rest.every((m) => eq(m.from, chain.escrow)) && settledTotal === svc.price
+    const toAgent = rest.length === 1 && eq(rest[0]!.to, record.agent)
+    const expected =
+      record.status === 'released' ? 'hold → vendor (price − fee) + treasury (fee)'
+      : record.status === 'refunded' || record.status === 'timed-out' ? 'hold → refund to the agent'
+      : 'hold only (still in escrow)'
+    const match =
+      holdOk &&
+      (record.status === 'released' ? settled && !toAgent
+        : record.status === 'refunded' || record.status === 'timed-out' ? settled && toAgent
+        : rest.length === 0)
+    return c.json(plain({ callId: record.callId, status: record.status, token: svc.token, expected, match, movements }))
+  })
+
+  /** Re-verify a call's proof offline (attestor, no key) and compare every hash with the chain. */
+  app.post('/proofs/:callId/verify', async (c) => {
+    const record = await store.get(c.req.param('callId')).catch(() => undefined)
+    if (!record) return c.json({ error: 'unknown call' }, 404)
+    const onchainSvc = await chain.service(record.serviceId)
+    const re = await attestor.reverify({ callId: record.callId, serviceId: record.serviceId, predicateHash: onchainSvc.predicateHash })
+    if ('error' in re) return c.json(re, 422)
+    const held = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Held', logs: await receiptLogs(record.holdTx) }).find((l) => l.args.callId === record.callId)
+    const settleLogs = await receiptLogs(record.settleTx)
+    const released = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Released', logs: settleLogs })[0]
+    const refunded = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Refunded', logs: settleLogs })[0]
+    const settledEvent = released ?? refunded
+    const onchain = {
+      requestHash: held?.args.requestHash ?? null,
+      originHash: onchainSvc.originHash,
+      notaryKeyHash: onchainSvc.notaryKeyHash,
+      predicateHash: onchainSvc.predicateHash,
+      presentationHash: settledEvent?.args.presentationHash ?? null,
+      outcome: released ? 'DELIVERED' : refunded ? 'FAILED' : null,
+    }
+    const same = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
+    const checks = [
+      { name: 'presentationHash', recomputed: re.presentationHash, onchain: onchain.presentationHash, ok: same(re.presentationHash, onchain.presentationHash) },
+      { name: 'requestHash', recomputed: re.requestHash, onchain: onchain.requestHash, ok: same(re.requestHash, onchain.requestHash) },
+      { name: 'originHash', recomputed: re.originHash, onchain: onchain.originHash, ok: same(re.originHash, onchain.originHash) },
+      { name: 'notaryKeyHash', recomputed: re.notaryKeyHash, onchain: onchain.notaryKeyHash, ok: same(re.notaryKeyHash, onchain.notaryKeyHash) },
+      { name: 'predicateHash', recomputed: re.predicateHash, onchain: onchain.predicateHash, ok: same(re.predicateHash, onchain.predicateHash) },
+      { name: 'outcome', recomputed: re.outcome, onchain: onchain.outcome, ok: re.outcome === onchain.outcome },
+      { name: 'callId header', recomputed: re.callHeader ?? null, onchain: record.callId, ok: re.callHeaderMatches },
+    ]
+    return c.json(plain({ callId: record.callId, ok: checks.every((k) => k.ok), checks, transcript: { request: re.request, response: re.response }, notaryKey: re.notaryKey, sessionTime: re.sessionTime }))
+  })
+
+  if (deps.dashboardDir && existsSync(deps.dashboardDir)) {
+    app.get('/', (c) => c.redirect('/dashboard/'))
+    app.get('/dashboard', (c) => c.redirect('/dashboard/'))
+    app.use('/dashboard/*', serveStatic({ root: deps.dashboardDir, rewriteRequestPath: (p) => p.replace(/^\/dashboard/, '') }))
+  }
+
   app.get('/llms.txt', (c) =>
     c.text(
       [

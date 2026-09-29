@@ -30,6 +30,9 @@ export type CallRecord = {
   settleTx?: Hex
   timeoutTx?: Hex
   proveMs?: number
+  /** MPC-TLS traffic between prover and notary. */
+  notaryBytes?: { sent: number; received: number }
+  signer?: Hex
   error?: string
   createdAt: string
   updatedAt: string
