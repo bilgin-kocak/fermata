@@ -1,6 +1,6 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-29**: Milestones 0, S, 1, 2, 3 and **4 done locally** — escrow contract, and the
+Status as of **2026-09-29**: Milestones 0, S, 1, 2, 3, 4 and **5 done locally** — escrow contract, and the
 Rust attestor proving the demo vendor with TLSNotary, binding the proof to the on-chain hold and
 signing verdicts that the escrow settles (live on Anvil's Tempo emulation). Every Moderato step is
 **DEFERRED** because `rpc.moderato.tempo.xyz` is refused (HTTP 403) by the build environment's
@@ -16,7 +16,7 @@ network policy. 13 days remain to 2026-10-12; freeze on **2026-10-09**.
 | 2 Attestor | 3–4 d | done in 1 d (09-29) | 09-29 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
 | 3 Gateway + method + SDK | 3 d | done in 1 d (09-29) | 09-29 | unchanged; receipt emission mechanism already found |
 | 4 Vendor, agent, dashboard | 3 d | done in 1 d (09-29) | 09-29 | unchanged; cut dashboard scope first if slipping |
-| 5 Submission polish | 2 d | 1.5 d | 10-08 → 10-09 | README trust-model text already drafted in FACTS |
+| 5 Submission polish | 2 d | done in 1 d (09-29) | 09-29 | video edit + Moderato run remain (Bilgin / network) |
 | **Total** | 14.5–16 d | **≈ 16 d** | freeze 10-09 | ≈ 1 day of slack |
 
 Largest schedule risk: every on-chain step (spike probes 1 and 3, M1 deploy, M3/M4 end to end,
@@ -227,10 +227,33 @@ Acceptance:
 Changes forced by measurements: the attestor proves in a child process per attempt (MPC setup
 stalls in the long-lived server); `tempoChain` sets `blockTime: 1000` (receipt polling).
 
-## Milestone 5 — submission polish (1.5 d)
+## Milestone 5 — submission polish (done locally 2026-09-29)
 
-README per the prompt, with the trust-model paragraph amended for the own-notary design and the
-economics note using measured numbers; `docs/DEMO.md`; `SECURITY.md`; submission checklist.
+Bilgin's decisions: team is Bilgin Kocak, solo (location: Bilgin to fill in); the video is a
+storyboard + raw headless recordings that Bilgin voices and edits; freeze on **2026-10-09**.
+
+Acceptance:
+- [x] README: pitch line, tagline, chargeback framing, "different from receipts", two Mermaid
+  diagrams, "What the proof does and does not establish" and the v1 trust model verbatim (the one
+  adjustment — no PSE notary, it was shut down — is footnoted, not silently edited), economics
+  note, the six roadmap items, the exact quickstart (run from a fresh clone: forge 51, SDK 32,
+  gateway 11, `demo:cases` 3/3), status and freeze. Mermaid checked with mermaid 11.
+- [x] Freeze rule: demo, video and README frozen from 2026-10-09; afterwards only fixes a failing
+  `pnpm demo:cases` justifies (README, SUBMISSION, here).
+- [x] `docs/DEMO.md`: 2:40 storyboard (15 s problem, 20 s what Fermata is, 90 s the 100-call run,
+  20 s reconciliation by memo, 15 s roadmap and ask), shot list, timed voice-over, live
+  single-call fallback script, pre-record checklist.
+- [x] Raw footage: `node scripts/record/record.mjs` → `out/video/{terminal-cases,dashboard-load,
+  drawer-reverify,reconciliation}.webm` + stills (not committed; regenerate or attach to a release).
+- [x] `docs/SUBMISSION.md` (Colosseum checklist, Tempo integration, go-to-market), `SECURITY.md`,
+  logo `docs/img/logo.{svg,png}`.
+- [x] `demo-stack.sh` fixes found by the fresh-clone run: honours `CARGO_TARGET_DIR`; a failed
+  `up` stops whatever it already started.
+- [x] Dashboard fix found in the footage: token amounts were rounded to 4 decimals (the vendor's
+  0.00995 showed as 0.0100); they are now exact.
+- [ ] Moderato run of `demo:cases` / `demo:load` and its explorer links — DEFERRED (RPC 403 here).
+  Must happen before the 2026-10-09 freeze.
+- [ ] Location, voice-over, edit, upload — Bilgin.
 
 ## Reused from WebProof (bilgin-kocak/webproof-solana @ 609a654, Apache-2.0)
 

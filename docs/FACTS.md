@@ -467,6 +467,17 @@ processes on one 4-vCPU box.
 | Gas per call | hold ≈ 345k, settle ≈ 107k (Anvil-Tempo) |
 | Fees | escrow fee 0.00485 USD (0.5 % of 0.97 USD released); agent's own gas ≈ 0.057 USD for 100 holds at Anvil's decaying base fee |
 
+Repeat runs (same setup, same commands; the 3 % failures are random, so the split varies):
+
+| Run | Outcomes | Wall-clock | Per call p50 / p90 | Prove p50 / p90 / max | MPC per call | Gas hold / settle |
+|---|---|---|---|---|---|---|
+| M4 (above) | 97 / 3 | 226.8 s | 2.15 / 2.44 s | 1.13 / 1.39 / 5.4 s | 65.9 MB | 345k / 107k |
+| M5 rehearsal (while recording) | 96 / 4 | 244.3 s | 2.17 / 2.67 s | 1.25 / 1.60 / 8.1 s | 65.9 MB | 345k / 107k |
+| **M5 video footage** (`docs/DEMO.md`) | **95 / 5** | **254.1 s** | 2.24 / 2.81 s | 1.26 / 1.74 / 8.0 s | 65.9 MB | 350k / 109k |
+
+The recording runs had a headless Chromium recording video on the same 4 vCPUs, which is the
+likely cause of the slightly slower proving.
+
 Proving is now done in a **fresh child process per attempt** (`serve` spawns `fermata-attest
 prove`): inside the long-lived `serve` process MPC setup stalled on most sessions in the demo stack
 (5 of 7 in one run), a fresh process rarely stalls (1 retry in 100 calls above). Receipt polling
