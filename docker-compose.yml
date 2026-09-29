@@ -1,0 +1,50 @@
+# Fermata stack: demo vendor, notary, attestor, gateway. NOT validated in the build environment (no
+# Docker daemon there); the same topology runs as plain processes in scripts/e2e-gateway.sh.
+#   bash apps/vendor/gen-certs.sh && pnpm keys:init   # certs + .env
+#   docker compose up --build
+# The escrow must already be deployed (pnpm escrow:deploy) and the services registered
+# (pnpm service:register … --config gateway.config.json).
+services:
+  vendor:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    volumes: [./apps/vendor:/app:ro]
+    command: node server.mjs
+    environment: { PORT: "8443", CHAOS_RATE: "${CHAOS_RATE:-0}" }
+    networks: { default: { aliases: [vendor.fermata.test] } }
+
+  notary:
+    build: ./apps/attestor
+    command: notary --listen 0.0.0.0:7047 --ca /certs/ca.pem
+    environment: { NOTARY_PRIVATE_KEY: "${NOTARY_PRIVATE_KEY}" }
+    volumes: [./apps/vendor/certs:/certs:ro]
+
+  attestor:
+    build: ./apps/attestor
+    command: >
+      serve --listen 0.0.0.0:7048 --rpc ${TEMPO_RPC_URL} --escrow ${FERMATA_ESCROW}
+      --notary notary:7047 --ca /certs/ca.pem --predicate /predicates --storage /data/presentations
+    environment: { VERIFIER_PRIVATE_KEY: "${VERIFIER_PRIVATE_KEY}" }
+    volumes: [./apps/vendor/certs:/certs:ro, attestor-data:/data]
+    depends_on: [notary, vendor]
+
+  gateway:
+    image: node:22-bookworm-slim
+    working_dir: /repo
+    volumes: [./:/repo]
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm -F @fermata/gateway start"
+    environment:
+      GATEWAY_CONFIG: /repo/gateway.config.json
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_STORAGE: /repo/storage/calls
+      TEMPO_RPC_URL: ${TEMPO_RPC_URL}
+      FERMATA_ESCROW: ${FERMATA_ESCROW}
+      ATTESTOR_URL: http://attestor:7048
+      RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY}
+      GATEWAY_SECRET_KEY: ${GATEWAY_SECRET_KEY}
+      GATEWAY_UPSTREAM_CA: /repo/apps/vendor/certs/ca.pem
+    ports: ["4300:4300"]
+    depends_on: [attestor]
+
+volumes:
+  attestor-data:

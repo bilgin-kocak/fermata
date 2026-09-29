@@ -44,3 +44,4 @@ spikes/**/*.json.bak
 # contracts (Foundry)
 contracts/broadcast/
 contracts/cache/
+gateway.config.json

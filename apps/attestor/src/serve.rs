@@ -180,9 +180,11 @@ impl State {
         )
         .await
         {
-            Ok(signed) => {
-                Ok(json!({ "presentationHash": hex0x(&eip712::keccak(&bytes)), "verdict": signed }))
-            }
+            Ok(signed) => Ok(json!({
+                "presentationHash": hex0x(&eip712::keccak(&bytes)),
+                "verdict": signed,
+                "response": proved_response(&bytes, &self.roots),
+            })),
             Err(e) => match e.downcast_ref::<VerifyError>() {
                 Some(v) => Err((
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -191,6 +193,25 @@ impl State {
                 None => Err(internal(e)),
             },
         }
+    }
+}
+
+/// The vendor's response exactly as proved (so a gateway returns the bytes the verdict is about):
+/// status, headers and body (base64) when it parses as HTTP, plus the raw received bytes.
+fn proved_response(presentation: &[u8], roots: &[CertificateDer]) -> Value {
+    use base64::Engine as _;
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    match verify::verify_presentation(presentation, roots) {
+        Ok(call) => match &call.response {
+            Ok(res) => json!({
+                "status": res.status,
+                "headers": res.headers,
+                "bodyBase64": b64(&res.body),
+                "rawBase64": b64(&call.received),
+            }),
+            Err(e) => json!({ "status": null, "error": e, "rawBase64": b64(&call.received) }),
+        },
+        Err(e) => json!({ "status": null, "error": e.to_string() }),
     }
 }
 

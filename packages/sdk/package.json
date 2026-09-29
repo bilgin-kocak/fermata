@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Fermata SDK: FermataEscrow deployments + ABI, EIP-712 verdicts, requestHash, service ids (mppx methods arrive in Milestone 3)",
+  "description": "Fermata SDK: fermata MPP method (client + server), escrow bindings, reconcile/reclaim, EIP-712 verdicts, request/registration hashes",
   "exports": {
     ".": "./src/index.ts",
     "./deployments.json": "./src/deployments.json"
@@ -18,6 +18,10 @@
   "devDependencies": {
     "@types/node": "^22.19.0",
     "typescript": "~5.9.3",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.1",
+    "mppx": "0.11.0"
+  },
+  "peerDependencies": {
+    "mppx": "0.11.0"
   }
 }

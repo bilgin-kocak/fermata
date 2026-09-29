@@ -14,12 +14,14 @@ Vocabulary: `hold → release(proof) → refund`.
 
 ## Status
 
-Milestones 1 (escrow contract) and 2 (attestor) done locally; Moderato deployment pending network access.
+Milestones 1 (escrow), 2 (attestor) and 3 (gateway, `fermata` MPP method, SDK) done locally; Moderato deployment pending network access.
 
 - [`contracts/src/FermataEscrow.sol`](contracts/src/FermataEscrow.sol): `hold → settle(verdict) | claimTimeout`,
   TIP-20 permit + `…WithMemo` transfers with memo = callId, EIP-712 verdicts.
 - [`apps/attestor`](apps/attestor): `fermata-attest` — proves the vendor's HTTPS response with TLSNotary,
   binds it to the on-chain hold, evaluates the delivery predicate and signs the verdict.
+- [`apps/gateway`](apps/gateway): the MPP gateway agents pay — `fermata` (escrowed, pay on proof) or `tempo` (unprotected).
+- [`packages/sdk`](packages/sdk): `fermata()` client + `fermataServer()` for `mppx`, escrow bindings, `reconcile`, `reclaim`.
 - [`apps/vendor`](apps/vendor): demo vendor (TLS 1.2 quote API) with failure modes.
 - [`docs/FACTS.md`](docs/FACTS.md): verified facts about Tempo, MPP and TLSNotary, with sources, dates and measurements.
 - [`docs/PLAN.md`](docs/PLAN.md): milestone plan, status and open risks.
@@ -37,6 +39,8 @@ cd .. && pnpm sdk:test                                      # viem EIP-712 == Ru
 pnpm escrow:e2e:anvil     # anvil --chain-id 42431: deploy + DELIVERED/FAILED/TIMEOUT round trip
 pnpm attest:test          # attestor unit + integration tests (real MPC-TLS; needs node, openssl, Rust 1.95)
 pnpm attest:e2e:anvil     # hold → TLSNotary proof → verdict → settle, every component a real process
+pnpm gateway:test         # gateway unit tests
+pnpm gateway:e2e:anvil    # an mppx agent pays through the gateway: DELIVERED / FAILED / no answer → refund
 
 # Tempo Moderato testnet
 pnpm keys:init            # writes .env with fresh testnet keys; prints faucet commands
