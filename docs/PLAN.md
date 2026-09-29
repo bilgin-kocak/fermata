@@ -1,6 +1,6 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-29**: Milestones 0, S, 1 and **2 done locally** — escrow contract, and the
+Status as of **2026-09-29**: Milestones 0, S, 1, 2 and **3 done locally** — escrow contract, and the
 Rust attestor proving the demo vendor with TLSNotary, binding the proof to the on-chain hold and
 signing verdicts that the escrow settles (live on Anvil's Tempo emulation). Every Moderato step is
 **DEFERRED** because `rpc.moderato.tempo.xyz` is refused (HTTP 403) by the build environment's
@@ -14,7 +14,7 @@ network policy. 13 days remain to 2026-10-12; freeze on **2026-10-09**.
 | S Integration spike | 1–1.5 d | done in 1 d (09-23) | 09-23 | all local legs GREEN; Moderato legs deferred (RPC blocked) |
 | 1 Escrow contract | 2 d | done in 1 d (09-24) | 09-24 | local GREEN; Moderato deploy deferred (RPC blocked) |
 | 2 Attestor | 3–4 d | done in 1 d (09-29) | 09-29 | −1 d from the WebProof port, +0.5 d TCP notary + key handling, +0.5 d binding checks/tests |
-| 3 Gateway + method + SDK | 3 d | 3 d | 10-02 → 10-04 | unchanged; receipt emission mechanism already found |
+| 3 Gateway + method + SDK | 3 d | done in 1 d (09-29) | 09-29 | unchanged; receipt emission mechanism already found |
 | 4 Vendor, agent, dashboard | 3 d | 3 d | 10-05 → 10-07 | unchanged; cut dashboard scope first if slipping |
 | 5 Submission polish | 2 d | 1.5 d | 10-08 → 10-09 | README trust-model text already drafted in FACTS |
 | **Total** | 14.5–16 d | **≈ 16 d** | freeze 10-09 | ≈ 1 day of slack |
@@ -175,17 +175,32 @@ Open risk: MPC setup stalls (≈ 16 % of sessions in a long-lived process, ≈ 5
 process each), absorbed by a 5 s setup bound + retry; if the 100-call load test suffers, `serve`
 switches to a child process per proof.
 
-## Milestone 3 — gateway, `fermata` method, SDK (3 d)
+## Milestone 3 — gateway, `fermata` method, SDK (done locally 2026-09-29)
 
-Hono + `mppx@0.11.0`. `fermata` method: `request` hook computes `requestHash` and mints
-`callId`; `stableBinding` compares `serviceId`, `amount`, `currency`, `requestHash` (not
-`callId`); `validate` (async) reads the hold tx receipt's `Held` log and the open hold, throwing
-`Errors.VerificationFailedError` on any mismatch or RPC error; `broadcast` returns the hold
-receipt; `Store.tryClaim` on `callId` with idempotent re-presentation. The route handler then
-proves (attestor `serve`), verifies, settles from the relayer wallet, and overwrites
-`Payment-Receipt` with `Receipt.serialize({ …, callId, txHash, presentationHash, outcome })`.
-Fallback `tempo` charge composed into the same 402, tagged `unprotected`. `/openapi.json`
-discovery. Report the validator's exact output for both methods.
+Bilgin's decisions: settle, then respond (the receipt carries the settle tx); a gateway sweeper
+calls `claimTimeout` after the window and the SDK has `reclaim(callId)`; call records are JSON
+files.
+
+Acceptance:
+- [x] `packages/sdk`: `fermataMethod`, `fermata()` client (refuses an untrusted verifier / escrow /
+  chain / token or a price mismatch before any money moves), `fermataServer()` (Held event with
+  this callId/serviceId/requestHash/amount on this escrow, hold still open, one claim per callId),
+  escrow bindings, `reconcile(token, callId)`, `reclaim(callId)`.
+- [x] `apps/gateway`: `ANY /s/:serviceId/*` (402 with `fermata` + unprotected `tempo`), hold →
+  attestor → settle → proved response + receipt `{callId, holdTx, txHash, presentationHash,
+  outcome}`; the two failure branches exactly as the brief says (transcript → verdict → settle; no
+  transcript → no verdict, `awaiting-timeout`, logged loudly, sweeper refund); `GET /proofs/:callId`,
+  `/calls/:callId`, `/services`, `/openapi.json`, `/llms.txt`; refuses to start if the on-chain
+  verifier or origin does not match the attestor.
+- [x] Unit tests (10, fake chain + attestor) incl. replay and a credential reused on another
+  request (mutation-checked); SDK 32 tests.
+- [x] End-to-end Vitest through the whole stack (`pnpm gateway:e2e:anvil`): DELIVERED, FAILED,
+  no answer → sweeper refund, each reconciled by memo; downloaded proof hashes to the on-chain
+  `presentationHash`. Same test runs on Moderato with `FERMATA_E2E_CHAIN=moderato` + env.
+- [x] Validator: 40 passed; the 3 failures are its Moderato payment phase (FACTS §15.3). It skips
+  `fermata`, as recorded in the spike.
+- [ ] Moderato e2e and validator payment phase — DEFERRED (RPC 403 here).
+- `docker-compose.yml` + `apps/attestor/Dockerfile` written, not validated (no Docker daemon).
 
 ## Milestone 4 — demo vendor, agent, dashboard (3 d)
 

@@ -428,3 +428,24 @@ by committed ranges): the prover commits the sent transcript in pieces around th
 `Authorization`, `Cookie`, `Proxy-Authorization` and reveals everything else; the received
 transcript is revealed in full. The verifier rejects any hidden byte outside those header values
 and any unrevealed response byte. Hidden bytes render as `*`.
+
+### 15.3 Gateway (Milestone 3, 2026-09-29)
+
+`pnpm gateway:e2e:anvil`: Anvil (Tempo emulation), escrow, three vendors, notary, attestor and the
+gateway as separate processes; an agent pays with `mppx/client` + the SDK's `fermata()` method.
+
+| Measurement | Value |
+|---|---|
+| Paid call DELIVERED, hold verified → proved → verified → settled (gateway record) | ≈ 3 s (prove 3.0 s incl. setup; settle one Anvil block) |
+| Paid call FAILED (authenticated 500) | ≈ 2 s held → refunded (prove 1.8 s) |
+| No answer → `awaiting-timeout` → sweeper `claimTimeout` | after the window (60 s in the run; Anvil time fast-forwarded) |
+
+**Validator** (`mppx@0.11.0 validate http://127.0.0.1:4300/s/<serviceId>/v1/quote?symbol=BTC-USD`,
+run by the e2e script, output in `out/e2e-gateway/validator.txt`): **40 passed, 3 failed**.
+Discovery: `llms.txt` found, OpenAPI valid, 3 paid endpoints. Per endpoint: 402 without
+credentials, `Payment` scheme, "Challenge parseable (2 methods: fermata/charge, tempo/charge)",
+id/realm/expiry, realm = hostname, `[tempo]` recipient/currency/amount valid, malformed credential
+→ 402 with a fresh challenge. The 3 failures are the payment phase ("auto-provision wallet: Failed
+to create and fund testnet wallet") — it needs the Moderato faucet, refused here. As predicted
+(§11) the validator runs no method-specific checks and no payment for `fermata`; `fermata` is
+covered by the generic challenge and error-handling checks and by the e2e test.
