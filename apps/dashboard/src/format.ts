@@ -2,10 +2,11 @@ import type { CallStatus } from './api.ts'
 
 export const short = (h?: string | null, n = 6) => (!h ? '—' : h.length <= 2 + 2 * n ? h : `${h.slice(0, 2 + n)}…${h.slice(-4)}`)
 
-/** Token base units (6 decimals) → "0.0100". */
+/** Token base units (6 decimals) → exact decimal, at least 2 places: 10000 → "0.01", 9950 → "0.00995". */
 export const usd = (units: string | number | bigint, digits?: number) => {
   const v = Number(units) / 1e6
-  return v.toFixed(digits ?? (v !== 0 && Math.abs(v) < 0.001 ? 6 : 4))
+  if (digits !== undefined) return v.toFixed(digits)
+  return v.toFixed(6).replace(/(\.\d\d\d*?)0+$/, '$1')
 }
 
 export const compact = (n: number) =>

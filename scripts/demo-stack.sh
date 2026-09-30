@@ -32,6 +32,7 @@ if [ "$CMD" = down ]; then down; exit 0; fi
 [ "$CMD" = up ] || { echo "usage: demo-stack.sh up|down [--chain anvil|moderato]" >&2; exit 2; }
 down
 rm -rf "$DIR" && mkdir -p "$DIR"
+trap '[ $? -eq 0 ] || { echo "demo stack failed; stopping what started" >&2; down; }' EXIT
 
 ANVIL_PORT=${ANVIL_PORT:-8549}
 NOTARY_PORT=7347; ATTESTOR_PORT=7348; GATEWAY_PORT=${GATEWAY_PORT:-4300}
@@ -62,7 +63,7 @@ fi
 
 echo "== attestor build"
 (cd apps/attestor && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +1.95.0 build --release -q)
-BIN=$PWD/apps/attestor/target/release/fermata-attest
+BIN=$(cd apps/attestor && realpath "${CARGO_TARGET_DIR:-target}")/release/fermata-attest
 [ -f apps/vendor/certs/ca.pem ] || bash apps/vendor/gen-certs.sh > "$DIR/certs.log"
 CA=$PWD/apps/vendor/certs/ca.pem
 if [ ! -f apps/dashboard/dist/index.html ] && [ -f apps/dashboard/package.json ]; then
