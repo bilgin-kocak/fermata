@@ -40,7 +40,9 @@ QUOTE_PORT=8843; OK_PORT=8844; E500_PORT=8845; HANG_PORT=8846
 TSX=node_modules/.bin/tsx
 bg() { # log-name command... — start detached, remember the pid
   local name=$1; shift
-  setsid "$@" > "$DIR/$name.log" 2>&1 < /dev/null &
+  # setsid is Linux-only; macOS falls back to nohup.
+  if command -v setsid > /dev/null; then setsid "$@" > "$DIR/$name.log" 2>&1 < /dev/null &
+  else nohup "$@" > "$DIR/$name.log" 2>&1 < /dev/null & fi
   echo $! >> "$PIDS"
 }
 wait_port() { for _ in $(seq 150); do (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && return 0; sleep 0.1; done; echo "port $1 did not open (see $DIR)" >&2; return 1; }

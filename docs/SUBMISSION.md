@@ -13,7 +13,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | Description | ✅ | [below](#description) |
 | Tempo integration | ✅ | [below](#tempo-integration) |
 | Team | ✅ | Bilgin Kocak (solo) — GitHub [@bilgin-kocak](https://github.com/bilgin-kocak) |
-| Location | ✍️ | **TODO (Bilgin): city, country** |
+| Location | ✅ | Eskişehir, Turkey |
 | Logo (𝄐) | ✅ | [`docs/img/logo.svg`](img/logo.svg), [`docs/img/logo.png`](img/logo.png) (512×512) |
 | GitHub link | ✅ | https://github.com/bilgin-kocak/fermata (make sure `main` is the default branch) |
 | Video (2–3 min) | ⏳ | storyboard + voice-over in [`DEMO.md`](DEMO.md); raw clips via `scripts/record/`; **TODO (Bilgin): record VO, edit, upload, paste link** |
@@ -66,8 +66,16 @@ verifiers, an N-of-M quorum and on-chain proof verification are on the roadmap.
 - **Stablecoin gas.** Agents pay gas in the same TIP-20 stablecoin (pathUSD on testnet); the demo's
   totals report escrow fee and gas separately.
 - **Network:** Tempo Moderato testnet, chain ID 42431, explorer `explore.testnet.tempo.xyz`.
-  ⏳ Moderato deployment address and explorer links: pending network access from the build
-  environment; every number so far is from Anvil's Tempo emulation (`anvil --chain-id 42431`).
+  FermataEscrow on Moderato: [`0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`](https://explore.testnet.tempo.xyz/address/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763)
+  ([deploy tx](https://explore.testnet.tempo.xyz/tx/0x96e0a6682f522f6920a3104de329f45a96e804968ac3a3cc98600bcc1b5e174a)).
+  `demo:cases --chain moderato` 3/3 PASS — release
+  [hold](https://explore.testnet.tempo.xyz/tx/0xb9d627e454bb9496a50d6dac9fe17d4fb2e4f3a4a04d401e183a447f6cdcf84b) /
+  [settle](https://explore.testnet.tempo.xyz/tx/0xd480381bb6f5ba8135065bdf228d6fd863069f942c61f4c092d27dd02d3b4463), verified-failure refund
+  [hold](https://explore.testnet.tempo.xyz/tx/0x0475e28b8095eaef2164eb85527b9810abdf182583477d1a3c27fdd823b40741) /
+  [refund](https://explore.testnet.tempo.xyz/tx/0x65650d96981a6f40d360112ffba952c5003c9394be2f301e6ff7ef6ae4e1ce10), timeout refund
+  [hold](https://explore.testnet.tempo.xyz/tx/0x1afc771c3bf299f494ec49b240d0e3e57aab54cc9e889bdb8693a0ec0fecfbc6) /
+  [refund](https://explore.testnet.tempo.xyz/tx/0x3da2db644387a15b54a8e568639446cc4b820deb6e4372e96d7eaee6149d2c4d).
+  100-call load on Moderato: 96 released, 4 refunded, 0 errors.
 
 ## Go-to-market
 
@@ -84,10 +92,10 @@ verifiers, an N-of-M quorum and on-chain proof verification are on the roadmap.
 
 ## Before submitting
 
-- [ ] ✍️ Location filled in above.
-- [ ] ⏳ `bash scripts/demo-stack.sh up --chain moderato && pnpm demo:cases --chain moderato` →
-      3/3 PASS with explorer links; paste the links and the escrow address here and in the README.
-- [ ] ⏳ `pnpm demo:load --calls 100 --chain moderato` (or state in the video that the 100-call run is Anvil).
+- [x] Location filled in above.
+- [x] `bash scripts/demo-stack.sh up --chain moderato && pnpm demo:cases --chain moderato` →
+      3/3 PASS with explorer links (2026-10-01; links and escrow address above and in the README).
+- [x] `pnpm demo:load --calls 100 --chain moderato` → 96/4, 0 errors (the recorded footage is Anvil; keep its caption).
 - [ ] ✍️ Video recorded, edited, uploaded; link pasted above.
 - [ ] `main` is the default branch on GitHub; README renders (Mermaid diagrams, logo).
 - [ ] Claims audit: nothing in the README, video or this form claims more than the v1 trust model.

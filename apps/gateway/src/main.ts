@@ -38,6 +38,8 @@ const dispatcher = new Agent({
     ca: process.env.GATEWAY_UPSTREAM_CA ? readFileSync(process.env.GATEWAY_UPSTREAM_CA) : undefined,
     lookup: (hostname, options, cb) => {
       const target = [...resolve.entries()].find(([k]) => k.split(':')[0] === hostname)?.[1]?.split(':')[0]
+      // Node ≥ 22.21 asks for { all: true } (Happy Eyeballs) and then expects an address list.
+      if (target && (options as { all?: boolean }).all) return (cb as (e: null, a: { address: string; family: number }[]) => void)(null, [{ address: target, family: 4 }])
       if (target) return (cb as (e: null, a: string, f: number) => void)(null, target, 4)
       return import('node:dns').then((dns) => dns.lookup(hostname, options, cb as never))
     },

@@ -944,6 +944,19 @@
         "treasury": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
         "feeBps": 50,
         "deployedAt": "2026-09-24T16:37:10.603Z"
+      },
+      "moderato": {
+        "chainId": 42431,
+        "address": "0x88A9886B99aC8a93475dEFBda6245161Cd1F0763",
+        "deployTx": "0x96e0a6682f522f6920a3104de329f45a96e804968ac3a3cc98600bcc1b5e174a",
+        "deployBlock": 37731437,
+        "deployGasUsed": 8104657,
+        "deployer": "0x42aBc9cadC3A84111734Cb238AB0173477032256",
+        "owner": "0x42aBc9cadC3A84111734Cb238AB0173477032256",
+        "treasury": "0x42aBc9cadC3A84111734Cb238AB0173477032256",
+        "feeBps": 50,
+        "deployedAt": "2026-10-01T17:17:52.035Z",
+        "explorer": "https://explore.testnet.tempo.xyz/address/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763"
       }
     }
   }

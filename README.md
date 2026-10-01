@@ -147,7 +147,19 @@ The video storyboard, voice-over and raw-footage recorder are in [`docs/DEMO.md`
 failing at random 3 % → **97 released, 3 refunded**, every one settled on-chain with memo = callId,
 no human input; 226.8 s wall-clock, 2.15 s per call (p50), 1.13 s MPC-TLS proving (p50).
 Repeat runs landed at 96/4 and 95/5 (the failures are random), 244–254 s.
-The same scripts run on Tempo Moderato with `--chain moderato`; that run is pending (see Status).
+
+**Measured on Tempo Moderato testnet** (2026-10-01, escrow
+[`0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`](https://explore.testnet.tempo.xyz/address/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763)):
+`pnpm demo:cases --chain moderato` → **3/3 PASS**; `pnpm demo:load --calls 100 --chain moderato` →
+**96 released, 4 refunded**, 0 errors, 746.3 s wall-clock, 7.5 s per call (p50, dominated by waiting
+for hold and settle to be included), 1.03 s MPC-TLS proving (p50); escrow fees $0.0048, gas paid by
+the agent $0.0341 in pathUSD.
+
+| Case (Moderato) | Hold | Settle / refund |
+|---|---|---|
+| 1 release (vendor delivers) | [tx](https://explore.testnet.tempo.xyz/tx/0xb9d627e454bb9496a50d6dac9fe17d4fb2e4f3a4a04d401e183a447f6cdcf84b) | [tx](https://explore.testnet.tempo.xyz/tx/0xd480381bb6f5ba8135065bdf228d6fd863069f942c61f4c092d27dd02d3b4463) |
+| 2 verified-failure refund | [tx](https://explore.testnet.tempo.xyz/tx/0x0475e28b8095eaef2164eb85527b9810abdf182583477d1a3c27fdd823b40741) | [tx](https://explore.testnet.tempo.xyz/tx/0x65650d96981a6f40d360112ffba952c5003c9394be2f301e6ff7ef6ae4e1ce10) |
+| 3 timeout refund | [tx](https://explore.testnet.tempo.xyz/tx/0x1afc771c3bf299f494ec49b240d0e3e57aab54cc9e889bdb8693a0ec0fecfbc6) | [tx](https://explore.testnet.tempo.xyz/tx/0x3da2db644387a15b54a8e568639446cc4b820deb6e4372e96d7eaee6149d2c4d) |
 
 ## Economics (measured, FACTS §15.4)
 
@@ -197,7 +209,11 @@ pnpm keys:init            # writes .env with fresh testnet keys; prints faucet c
 pnpm escrow:deploy --chain moderato
 bash scripts/demo-stack.sh up --chain moderato
 pnpm demo:cases --chain moderato
+pnpm demo:load --calls 100 --chain moderato
 ```
+
+`docker-compose.yml` and `apps/attestor/Dockerfile` are provided but **untested** (no Docker in the
+build environment); the scripts above are the tested path.
 
 ## Status
 
@@ -205,9 +221,11 @@ Milestones 0–4 done and green locally: escrow contract, attestor, gateway + `f
 SDK, demo stack + dashboard. Milestone 5 (this README, [`docs/DEMO.md`](docs/DEMO.md),
 [`docs/SUBMISSION.md`](docs/SUBMISSION.md), [`SECURITY.md`](SECURITY.md)) in progress.
 
-**Not yet done:** every Tempo Moderato run (deploy, `demo:cases`, `demo:load`) — the build
-environment's network policy refuses `rpc.moderato.tempo.xyz`. All numbers above are from Anvil's
-Tempo emulation and are labelled as such. Nothing is faked; see [`docs/PLAN.md`](docs/PLAN.md).
+**Tempo Moderato: done** (2026-10-01). Escrow deployed, `escrow:roundtrip`, gateway e2e (4/4),
+`demo:cases` (3/3) and the 100-call `demo:load` all pass on Moderato; the `mppx validate` payment
+phase passes too (88 passed, 0 failed; 4 warnings are the vendor's 404 for a quote request with no
+`?symbol=`). The recorded video footage is from Anvil's Tempo emulation and is captioned as such.
+Nothing is faked; see [`docs/PLAN.md`](docs/PLAN.md).
 
 **Freeze:** the demo, the video and this README are frozen from **2026-10-09** (72 h before the
 2026-10-12 deadline). After the freeze, only bug fixes that a failing `pnpm demo:cases` justifies.
