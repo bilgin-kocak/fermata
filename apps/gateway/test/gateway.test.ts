@@ -4,6 +4,9 @@ import path from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Challenge, Credential, Method, Receipt } from 'mppx'
 import { Mppx } from 'mppx/client'
+import { McpClient } from 'mppx/mcp/client'
+import { Client as McpSdkClient } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { encodeAbiParameters, encodeEventTopics, keccak256, toHex, type Address, type Hex } from 'viem'
 import { fermataEscrowAbi, fermataMethod, originHash, requestHash, serviceId as makeServiceId } from '@fermata/sdk'
 import { createGateway } from '../src/app.ts'
@@ -143,9 +146,9 @@ async function build(over: Partial<GatewayConfig> = {}) {
   })
 }
 
-/** An agent paying with `fermata`: the "hold" is recorded in the fake chain. */
-function agentFetch() {
-  const holdClient = Method.toClient(fermataMethod, {
+/** The agent's `fermata` method: the "hold" is recorded in the fake chain. */
+function holdMethod() {
+  return Method.toClient(fermataMethod, {
     async createCredential({ challenge }) {
       const r = challenge.request
       const txHash = keccak256(toHex(`hold-${r.callId}`))
@@ -155,7 +158,11 @@ function agentFetch() {
       return lastCredential
     },
   })
-  const m = Mppx.create({ methods: [holdClient], polyfill: false, fetch: ((url: string, init: RequestInit) => gw.app.request(url, init)) as never })
+}
+
+/** An agent paying with `fermata` over HTTP. */
+function agentFetch() {
+  const m = Mppx.create({ methods: [holdMethod()], polyfill: false, fetch: ((url: string, init: RequestInit) => gw.app.request(url, init)) as never })
   return (p: string, init?: RequestInit) => m.fetch(`${BASE}${p}`, init)
 }
 
@@ -296,3 +303,89 @@ describe('gateway', () => {
     expect((await gw.app.request(`${BASE}/s/0x${'99'.repeat(32)}/x`)).status).toBe(404)
   })
 })
+
+/** An MCP client on the gateway's /mcp endpoint; `pay` wraps it with the agent's `fermata` method. */
+async function mcpClient(pay = true) {
+  const client = new McpSdkClient({ name: 'test-agent', version: '0.0.0' })
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), { fetch: ((url: string, init: RequestInit) => gw.app.request(String(url), init)) as never }))
+  return pay ? McpClient.wrap(client, { methods: [holdMethod()] }) : client
+}
+
+type ToolResult = { content: { type: string; text: string }[]; isError?: boolean; _meta?: Record<string, any>; receipt?: Record<string, unknown> }
+
+describe('gateway MCP endpoint', () => {
+  it('lists every service as a paid tool plus the free fermata_* tools', async () => {
+    const { tools } = await (await mcpClient(false)).listTools()
+    expect(tools.map((t) => t.name)).toEqual(['call_quote', 'fermata_call', 'fermata_verify', 'fermata_reconcile'])
+    const quote = tools[0]!
+    expect(quote.inputSchema).toMatchObject({ required: ['path'] })
+    expect(quote.description).toContain('released to the vendor only if a TLSNotary proof')
+  })
+
+  it('a configured tool fills its path template and binds the challenge to that exact request', async () => {
+    gw = await build({ services: [{ ...config().services[0]!, tool: { name: 'get_quote', path: '/v1/quote?symbol={symbol}' } }] })
+    const client = await mcpClient(false)
+    expect((await client.listTools()).tools[0]).toMatchObject({ name: 'get_quote', inputSchema: { required: ['symbol'] } })
+    const err = await client.callTool({ name: 'get_quote', arguments: { symbol: 'ETH USD' } }).catch((e: unknown) => e as { code: number; data: { challenges: { method: string; request: Record<string, unknown> }[] } })
+    expect((err as { code: number }).code).toBe(-32042)
+    const challenge = (err as { data: { challenges: { method: string; request: Record<string, unknown> }[] } }).data.challenges[0]!
+    expect(challenge.method).toBe('fermata')
+    expect(challenge.request.requestHash).toBe(requestHash(sid, 'GET', '/v1/quote?symbol=ETH%20USD'))
+    expect(chain.settled).toEqual([])
+  })
+
+  it('DELIVERED: the agent pays over MCP, the call is proved, released and the result carries the receipt', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{"price":1}' })
+    const res = (await (await mcpClient()).callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' } })) as unknown as ToolResult
+    expect(res.isError).toBe(false)
+    expect(res.content[0]!.text).toContain('{"price":1}')
+    const call = res._meta!['org.fermata/call']
+    expect(call).toMatchObject({ status: 'released', outcome: 'DELIVERED', vendorStatus: 200 })
+    expect(res.receipt).toMatchObject({ method: 'fermata', status: 'success' })
+    expect(chain.settled).toEqual([{ callId: call.callId, outcome: 1 }])
+    expect(attestor.calls[0]!.url).toBe(`${upstream}/v1/quote?symbol=BTC-USD`)
+    expect(attestor.calls[0]!.headers).toMatchObject({ authorization: 'Bearer vendor-secret' })
+  })
+
+  it('FAILED: a proven 500 comes back as a tool error and the agent is refunded', async () => {
+    attestor.next = (i) => verdict(i.callId, 2, { status: 500, body: '{"error":"boom"}' })
+    const res = (await (await mcpClient()).callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' } })) as unknown as ToolResult
+    expect(res.isError).toBe(true)
+    expect(res.content[1]!.text).toContain('refunded to you')
+    expect(res._meta!['org.fermata/call']).toMatchObject({ status: 'refunded', outcome: 'FAILED', vendorStatus: 500 })
+    expect(chain.settled[0]?.outcome).toBe(2)
+  })
+
+  it('no transcript: no verdict, awaiting timeout, nothing settled', async () => {
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'vendor never answered' })
+    const res = (await (await mcpClient()).callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' } })) as unknown as ToolResult
+    expect(res.isError).toBe(true)
+    expect(res._meta!['org.fermata/call']).toMatchObject({ status: 'awaiting-timeout', outcome: null })
+    expect(chain.settled).toEqual([])
+  })
+
+  it('a credential cannot be replayed for a second call', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{"price":1}' })
+    await (await mcpClient()).callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' } })
+    const plain = await mcpClient(false)
+    const replay = await plain
+      .callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' }, _meta: { 'org.paymentauth/credential': Credential.deserialize(lastCredential!) } })
+      .catch((e: { code: number }) => e)
+    expect((replay as { code: number }).code).toBeLessThan(0)
+    expect(chain.settled).toHaveLength(1)
+  })
+
+  it('free tools: call record, offline re-verify and reconciliation by memo', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{"price":1}' })
+    const client = await mcpClient()
+    const paid = (await client.callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' } })) as unknown as ToolResult
+    const callId = paid._meta!['org.fermata/call'].callId
+    const record = (await client.callTool({ name: 'fermata_call', arguments: { callId } })) as unknown as ToolResult & { structuredContent: Record<string, unknown> }
+    expect(record.structuredContent).toMatchObject({ status: 'released' })
+    const recon = (await client.callTool({ name: 'fermata_reconcile', arguments: { callId } })) as unknown as ToolResult & { structuredContent: Record<string, unknown> }
+    expect(recon.structuredContent).toMatchObject({ match: true })
+    const bad = (await client.callTool({ name: 'fermata_call', arguments: { callId: 'nope' } })) as unknown as ToolResult
+    expect(bad.isError).toBe(true)
+  })
+})
+
