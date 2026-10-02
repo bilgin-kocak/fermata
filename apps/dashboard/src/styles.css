@@ -489,3 +489,14 @@ footer.foot {
 .bad-note {
   color: var(--critical-text);
 }
+
+.origin {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .badge {
+    font-size: 11px;
+    padding: 1px 8px;
+  }
+}

@@ -537,3 +537,22 @@ The setup:
 The notary is still ours (trust model unchanged). Coinbase was not reachable from here; Bilgin runs
 `scripts/probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`, then `REAL_VENDORS=npm,coinbase`.
 
+### 15.7 Vendor scores, public mode and onboarding (2026-10-02, Anvil)
+
+**Vendor score method** (`packages/sdk/src/scores.ts`):
+- **Inputs:** only the escrow's `ServiceRegistered`, `Held`, `Released` and `Refunded` events.
+- **Classification:** a refund with presentationHash ≠ 0 is a *proven failure*; one with presentationHash = 0 is a *timeout*.
+- **Delivery rate:** released ÷ settled, ranked by its Wilson 95 % lower bound. For example, 3/3 → 43.8 %, 950/1000 → 93.5 %.
+- **Distinct agents** per service are reported as a guard against self-dealing.
+- **Check:** `pnpm scores` (RPC only) equals the gateway's `/scores` on the same chain.
+
+**Public mode:**
+- All five demo kinds pass live through `POST /demo/call`: reliable → DELIVERED, broken → FAILED, real npm → DELIVERED, npm 404 → FAILED, silent → AWAITING_TIMEOUT, then the sweeper refunds after the 30 s window.
+- On Anvil, public mode mines a block every second; otherwise chain time stands still and windows never close.
+- `deploy/smoke.sh` passes 7/7 against it.
+
+**Onboarding:**
+- `pnpm demo:onboard` passes 7/7 against the real npm registry: probe, refuse unsafe URLs, register on-chain, served and on MCP at once, paid call released, on the scoreboard, proof re-verified.
+- The attestor picks up the new predicate file without a restart.
+- `run` supervision is verified: SIGTERM stops all; a dead component stops the stack with exit 1; a restart with stale state skips onboarded services that no longer check out.
+

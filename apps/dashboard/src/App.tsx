@@ -689,12 +689,12 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
                     {s.tool ?? s.label ?? short(s.serviceId, 8)}
                     {s.fewCalls ? <span className="badge" style={{ marginLeft: 8 }}>few calls</span> : null}
                   </div>
-                  <div className="mono muted" title={s.serviceId}>
+                  <div className="mono muted origin" title={s.serviceId}>
                     {s.upstream ?? short(s.serviceId, 8)}
                   </div>
                 </td>
                 <td className="num">
-                  {s.released}/{s.settled} <span className="muted">({pct(s.deliveryRate)})</span>
+                  {s.released}/{s.settled} <span className="muted hide-sm">({pct(s.deliveryRate)})</span>
                   {s.open ? <div className="muted">{s.open} open</div> : null}
                 </td>
                 <td className="num">

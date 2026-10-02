@@ -108,6 +108,44 @@ as a script (6/6 PASS on Anvil).
 claude mcp add fermata -e FERMATA_AGENT_KEY=0x… -e FERMATA_TRUSTED_VERIFIERS=0x… … -- tsx apps/mcp/src/index.ts
 ```
 
+## The product: pay on proof, vendor scores, self-serve onboarding
+
+Fermata is more than an escrow: every verdict is also an on-chain record of whether a vendor
+delivered. The hosted demo (Tempo testnet; [`deploy/`](deploy/README.md)) has three surfaces.
+
+**Try it.** Each button makes a real paid call: hold on-chain, TLSNotary proof, settle.
+- A server-side demo agent pays, so visitors need no wallet.
+- The vendors are a reliable one, a broken one, a silent one, and the real npm registry (a 200 and a 404).
+- Every call links to its transactions and its re-verifiable proof.
+
+![Try it: a paid call to the real npm registry, proved and released](docs/img/public-tryit.png)
+
+**Vendor scores.** Each vendor's proven delivery record comes **from the escrow's own events only**:
+- released;
+- refunded on a proven failure;
+- refunded on timeout;
+- distinct agents.
+
+Vendors are ranked by the Wilson 95 % lower bound, so 3/3 doesn't outrank 950/1000.
+`pnpm scores --chain moderato` recomputes the table from any RPC; on Anvil it matches the gateway
+exactly. Agents get the same data as a free MCP tool (`fermata_vendor_scores`) and can pick
+reliable vendors before paying. Two limits are stated with the scores:
+- only calls paid through Fermata count;
+- a vendor could pay itself, which is why distinct agents are shown.
+
+![Vendor scores from on-chain events](docs/img/public-vendors.png)
+
+**List your API.** A vendor pastes a URL. The gateway:
+1. checks it is a public HTTPS host (never a private or internal address);
+2. probes TLSNotary's TLS profile and takes a sample answer;
+3. drafts the delivery rule from that sample, for the vendor to review;
+4. registers the service on-chain;
+5. serves it at once: an HTTP endpoint, an MCP tool, a scoreboard row.
+
+`pnpm demo:onboard` runs this end to end against the real npm registry (7/7).
+
+![List your API: compatibility check and the drafted delivery rule](docs/img/public-onboard.png)
+
 ## What the proof does and does not establish
 
 * A TLSNotary presentation establishes that a specific HTTPS server, identified by its TLS certificate, sent specific bytes in response to specific request bytes. That is all. It does not establish that the data is correct (a quoted price can be wrong), and it cannot establish that a server never responded (no transcript, no proof).
@@ -147,6 +185,9 @@ pnpm demo:cases --chain anvil                  # the three canonical cases, pass
 pnpm demo:load --calls 100 --chain anvil       # ≈97/3, timings, MPC bandwidth, gas
 pnpm demo:mcp --chain anvil                    # an MCP agent pays on proof: released, refunded, verified
 pnpm demo:real --chain anvil                   # a real third-party API (registry.npmjs.org): 200 released, 404 refunded
+pnpm scores --chain anvil --escrow 0x…         # vendor scores recomputed from on-chain events only
+PUBLIC=1 bash scripts/demo-stack.sh up         # public mode: Try it, Vendors, List your API (deploy/README.md to host it)
+pnpm demo:onboard --chain anvil                # self-serve onboarding of a real API, end to end (public mode)
 open http://127.0.0.1:4300/dashboard           # live feed, proof drawer, reconciliation by memo
 bash scripts/demo-stack.sh down
 ```

@@ -288,6 +288,13 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
   - It leads with the Moderato numbers.
   - The economics slide uses the measured 66 MB per proof at an assumed $0.09/GB, the 5 % sampled-proving cost, and the 1 − (1 − p·f)^n detection probability.
   - The speaker notes are the pitch-video script.
+- [x] **Vendor scores, public demo and onboarding (2026-10-02).**
+  - SDK aggregator (Wilson bound) plus `pnpm scores`, `/scores`, the Vendors tab and the MCP `fermata_vendor_scores`.
+  - Public mode: `/demo/*` with limits, the faucet balance guard and the Try it panel.
+  - Onboarding: `/onboard/*` with the SSRF guard, the TLS-profile probe, predicate drafting, on-chain registration and `addService`; the attestor reloads predicates on a miss; the List your API tab.
+  - Deploy kit (`deploy/`): install, bootstrap, systemd, Caddy, smoke; `run` supervision; `FERMATA_STATE_DIR`.
+  - Gateway tests: 86. `demo:onboard` 7/7, `smoke.sh` 7/7, shellcheck clean.
+- [ ] Deploy to a VM (Bilgin, `deploy/README.md`), then add the live URL to README, SUBMISSION and the deck.
 - [ ] Pitch video, recorded by Bilgin from the deck's speaker notes. The rules (secondary source)
   ask for a pitch video separate from the demo video.
 

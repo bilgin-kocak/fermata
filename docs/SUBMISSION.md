@@ -20,6 +20,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | 3-minute demo | ⏳ | same video; the live part follows DEMO.md's "live single call" script |
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
+| Live demo | ⏳ | **TODO (Bilgin): deploy with [`deploy/README.md`](../deploy/README.md) (3 commands), paste `https://<host>/dashboard/` here.** It offers Try it, Vendor scores and List your API on Tempo testnet. |
 | Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides; downloads as PPTX/PDF). **It is private until Bilgin shares it** from the page's Share menu. Its speaker notes are the script for the separate 2–3 minute pitch video. |
 
 ## Description
@@ -48,6 +49,16 @@ Fermata; the notary is a separate, blind process that we run in the demo. A vend
 Fermata to sign honest verdicts — but every verdict points at a proof anyone can download and
 re-verify offline, so a dishonest verdict is detectable and the evidence is portable. Vendor-chosen
 verifiers, an N-of-M quorum and on-chain proof verification are on the roadmap.
+
+### Product
+
+Fermata has three parts.
+
+1. **Pay on proof:** escrowed payments, released only on a TLSNotary proof of delivery. A proven failure, or no proof in time, is refunded.
+2. **Vendor scores:** a public delivery record per vendor, computed only from the escrow's on-chain events, so anyone can recompute it with `pnpm scores`. Agents read it over MCP before paying.
+3. **Self-serve onboarding:** a vendor pastes an API URL. Fermata checks TLSNotary compatibility, drafts the delivery rule from a real sample, and registers the service on-chain.
+
+The hosted testnet demo lets judges try all three without a wallet.
 
 ## Tempo integration
 
