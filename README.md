@@ -217,9 +217,9 @@ build environment); the scripts above are the tested path.
 
 ## Status
 
-Milestones 0–4 done and green locally: escrow contract, attestor, gateway + `fermata` MPP method +
-SDK, demo stack + dashboard. Milestone 5 (this README, [`docs/DEMO.md`](docs/DEMO.md),
-[`docs/SUBMISSION.md`](docs/SUBMISSION.md), [`SECURITY.md`](SECURITY.md)) in progress.
+All milestones done: escrow contract, attestor, gateway + `fermata` MPP method + SDK, demo stack
++ dashboard, submission material ([`docs/DEMO.md`](docs/DEMO.md),
+[`docs/SUBMISSION.md`](docs/SUBMISSION.md), [`SECURITY.md`](SECURITY.md)). Left: the video.
 
 **Tempo Moderato: done** (2026-10-01). Escrow deployed, `escrow:roundtrip`, gateway e2e (4/4),
 `demo:cases` (3/3) and the 100-call `demo:load` all pass on Moderato; the `mppx validate` payment

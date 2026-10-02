@@ -1,10 +1,11 @@
 # PLAN.md — milestones, estimates and design decisions
 
-Status as of **2026-09-29**: Milestones 0, S, 1, 2, 3, 4 and **5 done locally** — escrow contract, and the
-Rust attestor proving the demo vendor with TLSNotary, binding the proof to the on-chain hold and
-signing verdicts that the escrow settles (live on Anvil's Tempo emulation). Every Moderato step is
-**DEFERRED** because `rpc.moderato.tempo.xyz` is refused (HTTP 403) by the build environment's
-network policy. 13 days remain to 2026-10-12; freeze on **2026-10-09**.
+Status as of **2026-10-02**: Milestones 0, S, 1, 2, 3, 4 and 5 **done, on Tempo Moderato too** —
+escrow deployed at `0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`; `escrow:roundtrip`, gateway e2e
+(4/4), `demo:cases` (3/3), the 100-call `demo:load` (96/4) and the `mppx validate` payment phase
+all pass on Moderato (run 2026-10-01 by Bilgin; the build environment still refuses
+`rpc.moderato.tempo.xyz`, so those runs happened outside it — FACTS §15.5). Left: the video
+(Bilgin). Freeze on **2026-10-09**; deadline 2026-10-12.
 
 ## Calendar
 
@@ -125,9 +126,8 @@ Acceptance:
 - [x] Round trip from a script: `pnpm escrow:roundtrip --chain anvil|moderato` — DELIVERED,
   FAILED and TIMEOUT, each reconciled from `TransferWithMemo` logs by callId alone;
   `pnpm escrow:e2e:anvil` runs deploy + round trip on a fresh Anvil in ≈ 25 s.
-- [ ] Moderato run with explorer links — DEFERRED (RPC 403). Keys already exist
-  (`pnpm keys:init`); needs faucet funding, `pnpm escrow:deploy --chain moderato`,
-  `pnpm escrow:roundtrip --chain moderato`.
+- [x] Moderato deploy + round trip with explorer links — done 2026-10-01 (run by Bilgin outside the build environment, which refuses the RPC). Escrow
+  `0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`, deploy gas 8,104,657 (same as Anvil).
 
 Deviations from the M1 plan: no 1-unit escrow seed (storage credits already refund the balance
 slot, FACTS §15.1); invariant `fail_on_revert = true` so handler assertions cannot be swallowed;
@@ -164,7 +164,7 @@ Acceptance:
 - [x] Live: `pnpm attest:e2e:anvil` — hold → attest → settle for DELIVERED and FAILED, replayed
   proof refused, offline re-verification against on-chain hashes, no transcript → no verdict →
   timeout refund.
-- [ ] Moderato — DEFERRED with the rest of the chain work (RPC 403 in this environment).
+- [x] Moderato — covered by the M3/M4 Moderato runs (done 2026-10-01 (run by Bilgin outside the build environment, which refuses the RPC)).
 
 Deviation: no `docker-compose.yml` yet (no Docker daemon here, and the gateway it would wire up is
 Milestone 3); it lands with the gateway. Faked: nothing — M1's placeholder verdicts are replaced
@@ -199,7 +199,8 @@ Acceptance:
   `presentationHash`. Same test runs on Moderato with `FERMATA_E2E_CHAIN=moderato` + env.
 - [x] Validator: 40 passed; the 3 failures are its Moderato payment phase (FACTS §15.3). It skips
   `fermata`, as recorded in the spike.
-- [ ] Moderato e2e and validator payment phase — DEFERRED (RPC 403 here).
+- [x] Moderato e2e (4/4) and `mppx validate` payment phase (88 passed, 0 failed; 4 warnings are
+  the vendor's 404 for a quote with no `?symbol=`) — done 2026-10-01 (run by Bilgin outside the build environment, which refuses the RPC).
 - `docker-compose.yml` + `apps/attestor/Dockerfile` written, not validated (no Docker daemon).
 
 ## Milestone 4 — demo agent, dashboard, `demo:cases`, `demo:load` (done locally 2026-09-29)
@@ -221,8 +222,7 @@ Acceptance:
   with recomputed vs on-chain hashes), Reconciliation tab (movements by memo, ✓ against the
   outcome), Services tab; light/dark, phone layout, fermata sign in the header. Screenshots in
   `docs/img/`.
-- [ ] `demo:cases` / `demo:load` on Moderato — DEFERRED (RPC 403 here). Same commands with
-  `--chain moderato` once the host is allowed.
+- [x] `demo:cases` (3/3) / `demo:load` (96/4) on Moderato — done 2026-10-01 (run by Bilgin outside the build environment, which refuses the RPC); explorer links in the README.
 
 Changes forced by measurements: the attestor proves in a child process per attempt (MPC setup
 stalls in the long-lived server); `tempoChain` sets `blockTime: 1000` (receipt polling).
@@ -251,9 +251,12 @@ Acceptance:
   `up` stops whatever it already started.
 - [x] Dashboard fix found in the footage: token amounts were rounded to 4 decimals (the vendor's
   0.00995 showed as 0.0100); they are now exact.
-- [ ] Moderato run of `demo:cases` / `demo:load` and its explorer links — DEFERRED (RPC 403 here).
-  Must happen before the 2026-10-09 freeze.
-- [ ] Location, voice-over, edit, upload — Bilgin.
+- [x] Moderato run of `demo:cases` / `demo:load` and its explorer links — 2026-10-01, before the freeze.
+- [x] Location (Eskişehir, Turkey).
+- [ ] Voice-over, edit, upload — Bilgin.
+- Found by the Moderato run and fixed: the gateway's pinned DNS lookup broke on Node ≥ 22.21
+  (`{ all: true }` → "Invalid IP address: undefined" on the unprotected `tempo` path); now in
+  `apps/gateway/src/upstream.ts` with a regression test that reproduces the error without the fix.
 
 ## Reused from WebProof (bilgin-kocak/webproof-solana @ 609a654, Apache-2.0)
 

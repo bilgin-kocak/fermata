@@ -49,7 +49,7 @@ RPC answers. GitHub sources used:
 | Chain | payments-first EVM L1 by Stripe/Paradigm; **mainnet (chain 4217) live since 2026-03-18**; Moderato (42431) is the public testnet | `tempoxyz/docs` `src/pages/docs/index.mdx`, `quickstart/connection-details.mdx` — original https://tempo.xyz/developers not fetched (egress blocked 2026-09-23) | CONFIRMS |
 | Testnet chain ID | **42431** (`0xa5bf`) | `connection-details.mdx`; viem `src/chains/definitions/tempoModerato.ts`; node `crates/chainspec/src/spec.rs` (`42431 => MODERATO`) | CONFIRMS |
 | RPC | `https://rpc.moderato.tempo.xyz` (WebSocket `wss://rpc.moderato.tempo.xyz`) | same | CONFIRMS |
-| Live `eth_chainId` | `[live check pending]` — `curl` returned `CONNECT tunnel failed, response 403` on 2026-09-23; expected `0xa5bf` | — | UNVERIFIED |
+| Live `eth_chainId` | 42431 — the Moderato deployment and runs of 2026-10-01 (§15.5) used chain ID 42431 end to end (EIP-712 domain, permits, `deployments.json`). Still refused from the build environment | §15.5 | CONFIRMS (indirectly, 2026-10-01) |
 | **Explorer** | **`https://explore.testnet.tempo.xyz`** for Moderato. `https://explore.tempo.xyz` is the **mainnet** explorer | `connection-details.mdx`; viem `tempoModerato.ts` `blockExplorers`; `tempo-apps/apps/explorer/src/lib/explorer-network.ts` (`testnet → explore.testnet.tempo.xyz`). The `tempoxyz/tempo` README and the Chainstack tutorial still list `explore.tempo.xyz` (out of date) | **CONTRADICTS** (§14.1) |
 | Block time / finality | blocks ≈ every 600 ms (consensus page) / "~0.5 s" (EVM page) / viem assumes 1000 ms; deterministic finality, `finalized` block tag; 4 permissioned validators on testnet | `protocol/blockspace/consensus.mdx`, `quickstart/evm-compatibility.mdx` | CONFIRMS ("well under a second") |
 | Hardfork / opcodes | targets **Osaka**; all opcodes supported; all Ethereum JSON-RPC methods work | `evm-compatibility.mdx` | — |
@@ -486,3 +486,26 @@ matters too: with no `blockTime` on the chain definition viem polls every 4 s; w
 
 `pnpm demo:cases --chain anvil`: 3/3 PASS (release: vendor 9,950 + treasury 50, proof re-verified
 offline, reconciled by memo; verified-failure refund; timeout refund by the gateway sweeper).
+
+### 15.5 Tempo Moderato testnet (2026-10-01)
+
+Run by Bilgin outside the build environment (which still refuses `rpc.moderato.tempo.xyz`), with
+the same commands as on Anvil and `--chain moderato`. Explorer links are in the README.
+
+| Measurement | Value |
+|---|---|
+| FermataEscrow | `0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`, block 37,731,437, deploy gas 8,104,657 (identical to Anvil), fee 50 bps |
+| `pnpm escrow:roundtrip --chain moderato` | pass |
+| Gateway e2e (`FERMATA_E2E_CHAIN=moderato`) | 4/4 |
+| `mppx validate` incl. payment phase | 88 passed, 0 failed, 4 warnings (vendor 404 for a quote without `?symbol=`) |
+| `pnpm demo:cases --chain moderato` | **3/3 PASS** (release, verified-failure refund, timeout refund) |
+| `pnpm demo:load --calls 100 --chain moderato` | **96 released / 4 refunded**, 0 errors |
+| Wall-clock, 100 calls | 746.3 s |
+| Per call, agent's view | p50 7.5 s — dominated by waiting for the hold and the settle transaction to be included |
+| Prove time (MPC-TLS) | p50 1.03 s |
+| Fees for 100 calls | escrow fee $0.0048; gas paid by the agent $0.0341 in pathUSD |
+
+Compared with Anvil (§15.4) proving is the same (≈ 1 s, it never touches the chain); the extra
+≈ 5 s per call is two sequential transaction inclusions. Pipelining calls (several holds in flight)
+or session escrow (one hold for N calls, roadmap) are the levers, not the prover.
+

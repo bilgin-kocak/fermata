@@ -1,9 +1,12 @@
 # DEMO.md — the video (2:40) and the live demo
 
 Target length **2:40** (limit 3:00). Voice-over at ≈ 150 words per minute; each beat's voice-over is
-shorter than its slot (≈ 2:07 of speech in 2:40), leaving room to pause on the numbers. Everything shown is the real system — no mock-ups, no edited numbers.
-Until the Tempo Moderato run is recorded, the footage is **Anvil's Tempo emulation** and the
-lower-third says so ("local Tempo emulation, chain ID 42431").
+shorter than its slot (≈ 2:11 of speech in 2:40), leaving room to pause on the numbers.
+Everything shown is the real system — no mock-ups, no edited numbers.
+The recorded clips are **Anvil's Tempo emulation** and the lower-third says so ("local Tempo
+emulation, chain ID 42431"). The same runs passed on **Tempo Moderato testnet** on 2026-10-01
+(`demo:cases` 3/3, 100 calls → 96/4; README and FACTS §15.5): the video says so with a Moderato
+card and an explorer shot, and never passes Anvil footage off as testnet.
 
 Freeze: demo, video and README frozen from **2026-10-09**.
 
@@ -34,8 +37,10 @@ random at 3 %, so a run lands anywhere around 97/3), 254.1 s wall-clock, 2.24 s 
 
 ![Final tiles of the recorded 100-call run](img/video-load-end.png)
 
-Also needed, recorded by Bilgin: face or voice intro (optional), and a screen capture of a real
-terminal for the live single call (below) if the video includes a live part.
+Also needed, recorded by Bilgin: a browser capture of the Moderato explorer (the escrow address
+page and the release settle tx from the README's "Case (Moderato)" table); a face or voice intro
+(optional); and a screen capture of a real terminal for the live single call (below) if the video
+includes a live part.
 
 ## Storyboard
 
@@ -62,13 +67,13 @@ release / refund*. Then `docs/img/logo.png` with the pitch line.
 **On-screen text (hold 3 s):** *Receipts prove the buyer paid. Fermata proves what the seller
 delivered.*
 
-### 0:35–2:05 · The 100-call run (90 s · VO 164 words ≈ 66 s; the rest is picture)
+### 0:35–2:05 · The 100-call run (90 s · VO 176 words ≈ 70 s; the rest is picture)
 
 | Time | Picture | Source |
 |---|---|---|
 | 0:35–0:50 | `terminal-cases.webm`, the three PASS blocks and the table | real time, cut to the three results |
 | 0:50–1:25 | `dashboard-load.webm`, **sped up ≈ 7.5×** (label *"7.5× speed · 100 calls in 4 min 14 s real time"*); tiles count up, feed fills, Refunded rows appear | `stills/load-*.png` for the freeze-frames |
-| 1:25–1:30 | freeze-frame on the final tiles: **100 held · 95 released · 5 refunded · 0 awaiting timeout** | `stills/load-end.png` |
+| 1:25–1:30 | freeze-frame on the final tiles: **100 held · 95 released · 5 refunded · 0 awaiting timeout**, then a card: *"Same 100 calls on Tempo Moderato testnet: 96 released · 4 refunded · 0 errors"* over the Moderato explorer page of escrow `0x88A9…0763` | `stills/load-end.png`; explorer capture (Bilgin, below) |
 | 1:30–2:05 | `drawer-reverify.webm`: open a Released call → transcript (auth header masked) → **Re-verify offline** → every hash ✓ next to the on-chain value; then a Refunded call showing the proved 500 | real time, trimmed |
 
 **Voice-over:**
@@ -80,7 +85,8 @@ delivered.*
 > Now a hundred calls. An agent buys a hundred quotes through Fermata, and the vendor fails about
 > three percent of the time, at random. Every call is held on-chain, proven with TLSNotary, and
 > settled — nobody touches anything. In this run, ninety-five
-> released and five refunded — every failure proven, and paid back by the contract.
+> released and five refunded — every failure proven, and paid back by the contract. On Tempo's
+> Moderato testnet the same hundred calls gave ninety-six and four.
 >
 > Open any call. This is what the vendor's server actually sent, with the API key redacted. The
 > proof is signed by the notary, and anyone can download it and re-verify it offline, with no
@@ -90,7 +96,8 @@ delivered.*
 ### 2:05–2:25 · Reconciliation by memo (20 s · VO 37 words ≈ 15 s)
 
 **Picture:** `reconciliation.webm`: rows with hold → release + fee, or hold → refund, each ✓;
-end on the footer's one-line `cast logs` command.
+end on the footer's one-line `cast logs` command. Optional 3 s cut: the Moderato explorer page of
+the release settle tx (README "Case (Moderato)" table) showing the two `TransferWithMemo` logs.
 
 **Voice-over:**
 > Every movement is a Tempo TIP-20 transfer whose memo is the call's ID. So the books reconcile
@@ -115,7 +122,8 @@ end on the footer's one-line `cast logs` command.
   the verdict; independent verification is not independent adjudication.
 - ❌ Never "the data is correct" — the proof shows what the server sent, not that the price is right.
 - ❌ Never latency guarantees — the transcript has no trusted clock.
-- ❌ Never "live on Tempo testnet" until the Moderato run exists; say "local Tempo emulation".
+- ✅ "Runs on Tempo Moderato testnet" — with the 2026-10-01 numbers (3/3 cases, 96/4 on 100 calls).
+- ❌ Never present the Anvil clips as testnet footage: they carry the "local Tempo emulation" caption.
 
 ## Live single call (fallback / live demo, ≈ 60 s)
 
