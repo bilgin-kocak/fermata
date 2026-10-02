@@ -444,3 +444,16 @@ describe('addService (onboarding)', () => {
     await expect(gw.addService({ serviceId: npm, upstream: 'https://evil.example.com' })).rejects.toThrow('not the registered origin')
   })
 })
+
+describe('onboarded services at startup', () => {
+  it('a persisted onboarded service that no longer checks out is skipped, a configured one is fatal', async () => {
+    const gone = makeServiceId(vendor, 'gone')
+    chain.origin = originHash('https://other.example.com') // the chain no longer matches either upstream
+    store = new CallStore(mkdtempSync(path.join(tmpdir(), 'fermata-gw-')))
+    const base = { chain, publicClient: chain.publicClient(), attestor, store, secretKey: 'unit-test-secret-key-at-least-32-bytes!!', log: () => {} }
+    const g = await createGateway({ ...base, config: { ...config(), services: [{ ...config().services[0]!, upstream: 'https://other.example.com' }, { serviceId: gone, upstream: 'https://gone.example.com', onboarded: true }], storageDir: store.dir } })
+    expect([...g.services.keys()]).toEqual([sid.toLowerCase()])
+    await expect(createGateway({ ...base, config: { ...config(), services: [{ serviceId: gone, upstream: 'https://gone.example.com' }], storageDir: store.dir } })).rejects.toThrow('not the registered origin')
+  })
+})
+

@@ -1,0 +1,26 @@
+# Fermata hosted demo on Tempo Moderato: vendors, notary, attestor and gateway, supervised as one.
+# Installed by deploy/install.sh; settings in /etc/fermata/fermata.env, keys in /opt/fermata/.env.
+[Unit]
+Description=Fermata hosted demo (pay on proof, Tempo Moderato testnet)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=fermata
+Group=fermata
+WorkingDirectory=/opt/fermata
+EnvironmentFile=/etc/fermata/fermata.env
+Environment=PATH=/var/lib/fermata/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env bash scripts/demo-stack.sh run --chain moderato
+Restart=always
+RestartSec=15
+# the first start may build the attestor and registers services on-chain
+TimeoutStartSec=1800
+KillMode=control-group
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

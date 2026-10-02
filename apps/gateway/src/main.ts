@@ -122,7 +122,8 @@ const gateway = await createGateway({
   fetchUpstream: async (url, init) => (await undiciFetch(url, { ...(init as object), dispatcher })) as unknown as Response,
   demo: await demoDeps(),
   onboard: onboardDeps(),
-  configPath: process.env.GATEWAY_CONFIG ?? 'gateway.config.json',
+  // onboarded services are persisted here (demo-stack merges them back into the config at start)
+  configPath: process.env.ONBOARD_SERVICES_FILE ?? process.env.GATEWAY_CONFIG ?? 'gateway.config.json',
 })
 self = gateway.app
 

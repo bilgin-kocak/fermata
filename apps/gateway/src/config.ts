@@ -14,6 +14,8 @@ export type ServiceConfig = {
   summary?: string
   /** How the service appears as a paid tool on the gateway's MCP endpoint (default: `call_<label>` with a raw `path`). */
   tool?: { name: string; description?: string; path: string }
+  /** Added by self-serve onboarding: skipped with a warning (not fatal) if it no longer checks out. */
+  onboarded?: boolean
   /** Unprotected fallback: plain `tempo` charge paid straight to the vendor, no proof. */
   tempo?: { amount: string; recipient: Address }
 }

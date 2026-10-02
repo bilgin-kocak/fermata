@@ -1,0 +1,16 @@
+# Fermata hosted demo: automatic HTTPS for the public host name, everything to the gateway.
+# deploy/bootstrap.sh writes this to /etc/caddy/Caddyfile with the domain filled in.
+{$FERMATA_DOMAIN} {
+	encode gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	request_body {
+		max_size 64KB
+	}
+	reverse_proxy 127.0.0.1:4300 {
+		flush_interval -1
+	}
+}

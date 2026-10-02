@@ -74,7 +74,14 @@ export async function loadServices(deps: GatewayDeps): Promise<Map<string, Servi
   if (!isAddressEqual(health.escrow, deps.chain.escrow)) throw new Error(`attestor serves escrow ${health.escrow}, gateway ${deps.chain.escrow}`)
   if (health.chainId !== deps.chain.chainId) throw new Error(`attestor on chain ${health.chainId}, gateway on ${deps.chain.chainId}`)
   const out = new Map<string, Service>()
-  for (const cfg of deps.config.services) out.set(cfg.serviceId.toLowerCase(), await checkService(deps, health.signer, cfg))
+  for (const cfg of deps.config.services) {
+    try {
+      out.set(cfg.serviceId.toLowerCase(), await checkService(deps, health.signer, cfg))
+    } catch (e) {
+      if (!cfg.onboarded) throw e
+      ;(deps.log ?? console.warn)(`onboarded service ${cfg.serviceId} skipped: ${(e as Error).message}`)
+    }
+  }
   return out
 }
 
@@ -361,12 +368,14 @@ export async function createGateway(deps: GatewayDeps) {
 
   /** Adds a service registered while running (onboarding): the same chain checks as at startup,
    *  then it is served, listed, scored and exposed over MCP at once, and persisted to the config. */
-  async function addService(cfg: ServiceConfig) {
+  async function addService(input: ServiceConfig) {
+    const cfg = { ...input, onboarded: true }
     const { signer } = await attestor.health()
     services.set(cfg.serviceId.toLowerCase(), await checkService(deps, signer, cfg))
     if (deps.configPath) {
       const { readFileSync, writeFileSync } = await import('node:fs')
-      const file = JSON.parse(readFileSync(deps.configPath, 'utf8')) as { services?: ServiceConfig[] }
+      const { existsSync } = await import('node:fs')
+      const file = (existsSync(deps.configPath) ? JSON.parse(readFileSync(deps.configPath, 'utf8')) : {}) as { services?: ServiceConfig[] }
       file.services = [...(file.services ?? []).filter((s) => s.serviceId.toLowerCase() !== cfg.serviceId.toLowerCase()), cfg]
       writeFileSync(deps.configPath, `${JSON.stringify(file, null, 2)}\n`)
     }

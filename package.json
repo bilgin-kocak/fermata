@@ -31,6 +31,7 @@
     "demo:real": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/real.ts",
     "demo:onboard": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/onboard.ts",
     "scores": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/scores.ts",
+    "fund": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/fund.ts",
     "mcp": "tsx apps/mcp/src/index.ts"
   },
   "devDependencies": {
