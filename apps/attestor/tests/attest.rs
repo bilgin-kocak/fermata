@@ -123,6 +123,7 @@ fn request(
         max_recv: 16384,
         redact,
         setup_timeout: Duration::from_secs(5),
+        proxy: None,
     }
 }
 
@@ -584,4 +585,87 @@ async fn soak() {
         ms.push(out.prove_ms);
     }
     println!("soak {n}: attempts {attempts:?}\nms {ms:?}");
+}
+
+/// A real third-party vendor: registry.npmjs.org, proved through our notary with Mozilla's roots,
+/// over the internet (through `FERMATA_UPSTREAM_PROXY` / `HTTPS_PROXY` when set, else directly).
+/// Checks a genuine 200 and a genuine 404, and that the proof does not verify against a dev CA.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs internet access to registry.npmjs.org; run with --ignored"]
+async fn real_vendor_npm() {
+    use fermata_attest::{config::trust_roots, tunnel::Proxy};
+    let mozilla = trust_roots(&[], true).unwrap();
+    let port = free_port();
+    let child = Command::new(env!("CARGO_BIN_EXE_fermata-attest"))
+        .args([
+            "notary",
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--roots",
+            "mozilla",
+        ])
+        .env("NOTARY_PRIVATE_KEY", hex0x(&NOTARY_KEY))
+        .env("RUST_LOG", "error")
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _notary = Proc(child);
+    wait_port(port).await;
+    let proxy = std::env::var("FERMATA_UPSTREAM_PROXY")
+        .or_else(|_| std::env::var("HTTPS_PROXY"))
+        .ok()
+        .map(|p| Proxy::parse(&p).unwrap());
+    let req = |target: &str| ProveRequest {
+        notary: format!("127.0.0.1:{port}"),
+        connect: "registry.npmjs.org:443".into(),
+        origin: Origin::new("registry.npmjs.org", 443).unwrap(),
+        roots: mozilla.clone(),
+        method: "GET".into(),
+        target: target.into(),
+        headers: vec![("accept".into(), "application/json".into())],
+        body: vec![],
+        call_id: [0x77; 32],
+        max_sent: 4096,
+        max_recv: 16384,
+        redact: default_redactions(),
+        setup_timeout: Duration::from_secs(10),
+        proxy: proxy.clone(),
+    };
+
+    let out = prove::prove(
+        &req("/-/package/mppx/dist-tags"),
+        3,
+        Duration::from_secs(40),
+    )
+    .await
+    .expect("prove npm");
+    println!(
+        "npm proved in {} ms, MPC {} B",
+        out.prove_ms,
+        out.notary_bytes.sent + out.notary_bytes.received
+    );
+    let v = verify::verify_presentation(&out.presentation, &mozilla)
+        .expect("verifies with Mozilla roots");
+    assert_eq!(v.server_name, "registry.npmjs.org");
+    let res = v.response.expect("HTTP response");
+    assert_eq!(res.status, 200);
+    assert!(String::from_utf8_lossy(&res.body).contains("\"latest\""));
+
+    let dev_ca = load_roots(&root().join("apps/vendor/certs/ca.pem"));
+    if let Ok(dev_ca) = dev_ca {
+        assert!(
+            verify::verify_presentation(&out.presentation, &dev_ca).is_err(),
+            "must not verify against a dev CA"
+        );
+    }
+
+    let missing = prove::prove(
+        &req("/-/package/no-such-package-fermata-zz/dist-tags"),
+        3,
+        Duration::from_secs(40),
+    )
+    .await
+    .expect("prove npm 404");
+    let v = verify::verify_presentation(&missing.presentation, &mozilla).unwrap();
+    assert_eq!(v.response.expect("HTTP response").status, 404);
 }

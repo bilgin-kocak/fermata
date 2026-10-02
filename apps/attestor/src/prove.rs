@@ -76,6 +76,8 @@ pub struct ProveRequest {
     pub redact: Vec<String>,
     /// Bound on MPC setup (healthy: < 1 s here).
     pub setup_timeout: Duration,
+    /// Reach the vendor through this HTTP CONNECT proxy (the notary connection never is).
+    pub proxy: Option<crate::tunnel::Proxy>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -262,9 +264,12 @@ pub async fn prove_once(req: &ProveRequest) -> Result<ProveOutput> {
                 req.setup_timeout
             )
         })??;
-    let server_socket = TcpStream::connect(&req.connect)
-        .await
-        .with_context(|| format!("connecting to vendor {}", req.connect))?;
+    let server_socket = match &req.proxy {
+        Some(proxy) => crate::tunnel::connect(proxy, &req.connect).await?,
+        None => TcpStream::connect(&req.connect)
+            .await
+            .with_context(|| format!("connecting to vendor {}", req.connect))?,
+    };
     server_socket.set_nodelay(true)?;
     let (tls_connection, prover) = prover.connect(tls_config, server_socket.compat())?;
     let mut prover_task = AbortOnDrop(tokio::spawn(prover.into_future()));

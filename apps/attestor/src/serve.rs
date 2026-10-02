@@ -37,8 +37,11 @@ use crate::{
 pub struct State {
     pub chain: RpcChain,
     pub roots: Vec<CertificateDer>,
-    /// PEM file of `roots` (passed to the per-attempt `prove` child).
-    pub ca_path: PathBuf,
+    /// PEM files and Mozilla flag behind `roots` (passed to the per-attempt `prove` child).
+    pub ca_paths: Vec<PathBuf>,
+    pub mozilla_roots: bool,
+    /// HTTP CONNECT proxy for vendors not pinned with `resolve` (passed to the `prove` child).
+    pub upstream_proxy: Option<String>,
     pub notary: String,
     pub predicates: PredicateStore,
     pub key: [u8; 32],
@@ -133,40 +136,47 @@ impl State {
         let mut result = None;
         for attempt in 1..=self.attempts.max(1) {
             let mut cmd = tokio::process::Command::new(&exe);
-            cmd.arg("prove")
-                .args(["--notary", &self.notary])
-                .arg("--ca")
-                .arg(&self.ca_path)
-                .args([
-                    "--url",
-                    &body.url,
-                    "--method",
-                    &body.method,
-                    "--call-id",
-                    &body.call_id,
-                ])
-                .arg("--body")
-                .arg(format!("@{}", body_file.display()))
-                .arg("--out")
-                .arg(&tmp)
-                .args(["--attempts", "1"])
-                .args([
-                    "--attempt-timeout-secs",
-                    &self.attempt_timeout.as_secs().to_string(),
-                ])
-                .args([
-                    "--max-sent",
-                    &self.max_sent.to_string(),
-                    "--max-recv",
-                    &self.max_recv.to_string(),
-                ])
-                .env("RUST_LOG", "error")
-                .env("RUST_BACKTRACE", "0")
-                .env("RUST_LIB_BACKTRACE", "0")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
+            cmd.arg("prove").args(["--notary", &self.notary]);
+            for ca in &self.ca_paths {
+                cmd.arg("--ca").arg(ca);
+            }
+            if self.mozilla_roots {
+                cmd.args(["--roots", "mozilla"]);
+            }
+            match &self.upstream_proxy {
+                Some(proxy) => cmd.env("FERMATA_UPSTREAM_PROXY", proxy),
+                None => cmd.env_remove("FERMATA_UPSTREAM_PROXY"),
+            };
+            cmd.args([
+                "--url",
+                &body.url,
+                "--method",
+                &body.method,
+                "--call-id",
+                &body.call_id,
+            ])
+            .arg("--body")
+            .arg(format!("@{}", body_file.display()))
+            .arg("--out")
+            .arg(&tmp)
+            .args(["--attempts", "1"])
+            .args([
+                "--attempt-timeout-secs",
+                &self.attempt_timeout.as_secs().to_string(),
+            ])
+            .args([
+                "--max-sent",
+                &self.max_sent.to_string(),
+                "--max-recv",
+                &self.max_recv.to_string(),
+            ])
+            .env("RUST_LOG", "error")
+            .env("RUST_BACKTRACE", "0")
+            .env("RUST_LIB_BACKTRACE", "0")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
             if let Some(connect) = self.resolve.get(&authority) {
                 cmd.arg("--resolve").arg(format!("{authority}={connect}"));
             }
