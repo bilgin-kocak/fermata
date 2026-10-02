@@ -36,6 +36,8 @@ export type DemoDeps = {
   trustProxy?: boolean
   now?: () => number
   log?: (m: string) => void
+  /** The example path of a served service (set by the gateway): lets visitors try onboarded services. */
+  examplePath?: (serviceId: Hex) => string | undefined
 }
 
 export function publicRoutes(app: Hono, deps: DemoDeps) {
@@ -81,20 +83,22 @@ export function publicRoutes(app: Hono, deps: DemoDeps) {
   })
 
   app.post('/demo/call', async (c) => {
-    const { kind } = ((await c.req.json().catch(() => ({}))) ?? {}) as { kind?: string }
-    const k = kind ? deps.config.kinds[kind] : undefined
-    if (!k) return c.json({ error: `unknown kind; one of ${Object.keys(deps.config.kinds).join(', ')}` }, 400)
+    const { kind, serviceId } = ((await c.req.json().catch(() => ({}))) ?? {}) as { kind?: string; serviceId?: Hex }
+    // Either a configured demo kind, or any served service at its example path (onboarded vendors).
+    const path = serviceId && /^0x[0-9a-fA-F]{64}$/.test(serviceId) ? deps.examplePath?.(serviceId) : undefined
+    const k = kind ? deps.config.kinds[kind] : path !== undefined ? { serviceId: serviceId!, path, label: 'service', description: '' } : undefined
+    if (!k) return c.json({ error: `unknown kind; one of ${Object.keys(deps.config.kinds).join(', ')}, or a served serviceId` }, 400)
     await guard().catch(() => undefined)
     if (readOnly) return c.json({ error: readOnly }, 503)
     if (busy) return c.json({ error: 'another visitor’s call is being proved; try again in a few seconds', retryAfterMs: 3000 }, 429)
     const wait = perIp.take(ip(c))
     if (wait) return c.json({ error: `one call per ${deps.config.perIpSeconds ?? 20} s per visitor`, retryAfterMs: wait }, 429)
     if (!daily.take()) return c.json({ error: 'today’s demo budget is used up; the scoreboard and past calls stay available' }, 429)
-    busy = kind
+    busy = kind ?? serviceId
     try {
       const r = await deps.pay(k.serviceId, k.path)
       log(`${kind}: HTTP ${r.status} ${r.outcome ?? ''} ${r.callId ?? ''}`)
-      return c.json({ kind, ...r })
+      return c.json({ kind: kind ?? 'service', ...r })
     } catch (e) {
       return c.json({ kind, error: (e as Error).message.slice(0, 300) }, 502)
     } finally {

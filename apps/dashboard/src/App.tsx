@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Reconciliation, type Reverify, type Scores, type Service } from './api.ts'
+import { api, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Predicate, type ProbeResult, type Reconciliation, type RegisterResult, type Reverify, type Scores, type Service } from './api.ts'
 import { STATUS, age, bytes, serviceLabel, short, usd } from './format.ts'
 
-type Tab = 'live' | 'vendors' | 'reconciliation' | 'services'
+type Tab = 'live' | 'vendors' | 'onboard' | 'reconciliation' | 'services'
 
 function usePoll<T>(load: () => Promise<T>, ms: number) {
   const [data, setData] = useState<T>()
@@ -506,6 +506,156 @@ function ReconciliationTab({ calls, info }: { calls: Call[]; info?: Info }) {
 
 const pct = (x: number | null) => (x === null ? '—' : `${(x * 100).toFixed(x === 1 || x === 0 ? 0 : 1)} %`)
 
+/** Self-serve onboarding (public mode): check → review the delivery rule → register on-chain. */
+function OnboardTab({ info }: { info?: Info }) {
+  const [url, setUrl] = useState('https://registry.npmjs.org/-/package/viem/dist-tags')
+  const [label, setLabel] = useState('')
+  const [payout, setPayout] = useState('')
+  const [price, setPrice] = useState('0.01')
+  const [summary, setSummary] = useState('')
+  const [probe, setProbe] = useState<ProbeResult>()
+  const [pred, setPred] = useState<Predicate>()
+  const [result, setResult] = useState<RegisterResult>()
+  const [test, setTest] = useState<DemoResult>()
+  const [busy, setBusy] = useState<string>()
+  const check = async () => {
+    setBusy('check')
+    setProbe(undefined)
+    setResult(undefined)
+    setTest(undefined)
+    try {
+      const p = await api.probe(url)
+      setProbe(p)
+      setPred(p.predicate)
+    } finally {
+      setBusy(undefined)
+    }
+  }
+  const toggleKey = (k: string) => {
+    if (!pred?.jsonSchema || !probe?.predicate?.jsonSchema) return
+    const all = probe.predicate.jsonSchema
+    const on = pred.jsonSchema.required.includes(k)
+    const required = on ? pred.jsonSchema.required.filter((x) => x !== k) : all.required.filter((x) => x === k || pred.jsonSchema!.required.includes(x))
+    setPred({ ...pred, jsonSchema: { type: 'object', required, properties: Object.fromEntries(required.map((x) => [x, all.properties[x]!])) } })
+  }
+  const register = async () => {
+    setBusy('register')
+    try {
+      setResult(await api.register({ url, label, payout, price, summary, predicate: pred }))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+  const tryIt = async () => {
+    setBusy('try')
+    try {
+      setTest(await api.demoCall('service', result?.serviceId))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+  const origin = typeof location === 'undefined' ? '' : location.origin
+  return (
+    <div className="panel onboard">
+      <h2>
+        List your API <span className="muted">get paid on proof — agents pay into escrow, released when TLSNotary proves you delivered</span>
+      </h2>
+      <div className="onboard-body">
+        <label>
+          1 · Your API's URL (a GET that returns your normal answer)
+          <input className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1/quote?symbol=BTC-USD" />
+        </label>
+        <div className="row-actions">
+          <button className="primary" disabled={!!busy || !url} onClick={() => void check()}>
+            {busy === 'check' ? 'Checking…' : 'Check compatibility'}
+          </button>
+        </div>
+        {probe && !probe.ok ? <div className="note bad-note">✗ {probe.error}</div> : null}
+        {probe?.ok && probe.sample ? (
+          <>
+            <div className="note">
+              <b>✓ TLSNotary-compatible.</b> {probe.sample.tls.protocol} · {probe.sample.tls.cipher} · {probe.sample.tls.group} · certificate by {probe.sample.tls.issuer ?? '—'} · HTTP {probe.sample.status} · {probe.sample.contentType ?? 'no content type'} · {probe.sample.bodyBytes} bytes
+              {probe.warnings?.length ? <div className="bad">{probe.warnings.join(' ')}</div> : null}
+            </div>
+            <pre className="transcript">{probe.sample.body}</pre>
+            <div>
+              <h4 style={{ margin: '12px 0 6px' }}>2 · Delivery rule (checked on every proved answer)</h4>
+              <ul className="rule">
+                <li>HTTP status is {pred?.status.join(' or ')}</li>
+                {pred?.contentType ? <li>Content type is {pred.contentType}</li> : null}
+                <li>Body is at most {pred?.maxBodyBytes} bytes</li>
+                {probe.predicate?.jsonSchema ? (
+                  <li>
+                    JSON object with these keys (untick optional ones):
+                    <div className="keys">
+                      {probe.predicate.jsonSchema.required.map((k) => (
+                        <label key={k} className="key">
+                          <input type="checkbox" checked={!!pred?.jsonSchema?.required.includes(k)} onChange={() => toggleKey(k)} /> <span className="mono">{k}</span>{' '}
+                          <span className="muted">{probe.predicate!.jsonSchema!.properties[k]!.type}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+            <h4 style={{ margin: '12px 0 6px' }}>3 · Register on {info?.explorer ? 'Tempo testnet' : 'the local chain'}</h4>
+            <div className="onboard-grid">
+              <label>
+                Short name (2–12: a–z, 0–9, -)
+                <input value={label} onChange={(e) => setLabel(e.target.value.toLowerCase())} placeholder="my-api" maxLength={12} />
+              </label>
+              <label>
+                Payout address (where you are paid)
+                <input className="mono" value={payout} onChange={(e) => setPayout(e.target.value.trim())} placeholder="0x…" />
+              </label>
+              <label>
+                Price per call (pathUSD)
+                <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" />
+              </label>
+              <label>
+                What it does (shown to agents)
+                <input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Latest version of an npm package" maxLength={200} />
+              </label>
+            </div>
+            <div className="row-actions">
+              <button className="primary" disabled={!!busy || !label || !payout} onClick={() => void register()}>
+                {busy === 'register' ? 'Registering on-chain…' : 'Register'}
+              </button>
+            </div>
+          </>
+        ) : null}
+        {result?.error ? <div className="note bad-note">✗ {result.error}</div> : null}
+        {result?.ok ? (
+          <div className="note">
+            <b>✓ Registered.</b> Service <span className="mono">{short(result.serviceId)}</span> · tx <TxLink hash={result.txHash} info={info} /> · MCP tool{' '}
+            <span className="mono">{result.tool}</span>
+            <pre className="transcript" style={{ marginTop: 8 }}>{`// agents (mppx): one line, pay on proof
+const res = await mppx.fetch('${origin}${result.endpoint}')
+
+# Claude Code: every service is a paid MCP tool
+claude mcp add fermata -e FERMATA_GATEWAY=${origin} -e FERMATA_AGENT_KEY=0x… -e FERMATA_TRUSTED_VERIFIERS=0x… -- npx tsx apps/mcp/src/index.ts`}</pre>
+            <div className="row-actions" style={{ marginTop: 8 }}>
+              <button disabled={!!busy} onClick={() => void tryIt()}>
+                {busy === 'try' ? 'Proving…' : 'Make a paid test call'}
+              </button>
+              {test ? (
+                <span>
+                  {test.error ? `✗ ${test.error}` : `${test.outcome === 'DELIVERED' ? '✓ Released to you' : test.outcome === 'FAILED' ? '↩ Refunded (your answer failed the rule)' : '⏳ No proof'} · HTTP ${test.status}`} {test.settleTx ? <TxLink hash={test.settleTx} info={info} /> : null}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <footer className="foot" style={{ padding: '0 14px 12px' }}>
+        Testnet only. Your API must be public HTTPS on port 443 and speak TLS 1.2 with AES-128-GCM on P-256 (TLSNotary's profile); private and internal addresses are refused.
+        Registration is done by the Fermata operator on your behalf; payments go to your payout address.
+      </footer>
+    </div>
+  )
+}
+
 /** Every vendor's proven delivery record, from on-chain escrow events only (GET /scores). */
 function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
   if (!scores) return <div className="empty">Loading…</div>
@@ -646,6 +796,7 @@ export function App() {
           [
             ['live', 'Live'],
             ['vendors', 'Vendors'],
+            ...(demo?.enabled ? ([['onboard', 'List your API']] as const) : []),
             ['reconciliation', 'Reconciliation'],
             ['services', 'Services'],
           ] as const
@@ -659,6 +810,7 @@ export function App() {
       {tab === 'live' ? <LiveTab calls={calls} events={events} info={info} onOpen={setOpen} /> : null}
       {tab === 'reconciliation' ? <ReconciliationTab calls={calls} info={info} /> : null}
       {tab === 'vendors' ? <VendorsTab scores={scores} info={info} /> : null}
+      {tab === 'onboard' && demo?.enabled ? <OnboardTab info={info} /> : null}
       {tab === 'services' ? <ServicesTab services={services} info={info} /> : null}
       <footer className="foot">
         A disclosed Fermata verifier signs each verdict; every verdict points at a TLSNotary presentation anyone can download and

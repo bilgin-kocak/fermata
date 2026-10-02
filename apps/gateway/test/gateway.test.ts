@@ -422,3 +422,25 @@ describe('vendor scores', () => {
   })
 })
 
+
+describe('addService (onboarding)', () => {
+  it('serves, lists, exposes over MCP and persists a service registered while running', async () => {
+    const { writeFileSync, readFileSync } = await import('node:fs')
+    const cfgPath = path.join(mkdtempSync(path.join(tmpdir(), 'fermata-cfg-')), 'gateway.config.json')
+    writeFileSync(cfgPath, JSON.stringify({ escrow, services: config().services }))
+    store = new CallStore(mkdtempSync(path.join(tmpdir(), 'fermata-gw-')))
+    gw = await createGateway({
+      config: { ...config(), storageDir: store.dir }, chain, publicClient: chain.publicClient(), attestor, store,
+      secretKey: 'unit-test-secret-key-at-least-32-bytes!!', env: { VENDOR_TOKEN: 'Bearer vendor-secret' }, log: () => {}, configPath: cfgPath,
+    })
+    const npm = makeServiceId(vendor, 'npm-tags')
+    chain.origin = originHash('https://registry.npmjs.org') // FakeChain reports this origin for every id
+    await gw.addService({ serviceId: npm, upstream: 'https://registry.npmjs.org', examplePath: '/-/package/mppx/dist-tags', tool: { name: 'npm_latest_version', path: '/-/package/{package}/dist-tags' } })
+    expect(((await (await gw.app.request(`${BASE}/services`)).json()) as { serviceId: string }[]).map((s) => s.serviceId)).toContain(npm)
+    expect((await (await mcpClient(false)).listTools()).tools.map((t) => t.name)).toContain('npm_latest_version')
+    const persisted = JSON.parse(readFileSync(cfgPath, 'utf8')) as { services: { serviceId: string }[] }
+    expect(persisted.services.map((s) => s.serviceId)).toEqual([sid, npm])
+    // the chain checks still apply: a wrong origin is refused
+    await expect(gw.addService({ serviceId: npm, upstream: 'https://evil.example.com' })).rejects.toThrow('not the registered origin')
+  })
+})

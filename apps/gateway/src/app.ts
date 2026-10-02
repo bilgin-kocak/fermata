@@ -10,6 +10,7 @@ import type { Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
 import { mcpHandler, toolFor } from './mcp.ts'
+import { onboardRoutes, type OnboardDeps, type Registered, type RegisterInput } from './onboard.ts'
 import { publicRoutes, type DemoDeps } from './public.ts'
 import { FINAL, type CallRecord, type CallStore } from './store.ts'
 
@@ -32,6 +33,10 @@ export type GatewayDeps = {
   explorer?: string | null
   /** Public "try it" mode (hosted demo); off when absent. */
   demo?: DemoDeps
+  /** Self-serve onboarding (public mode); off when absent. `register` is wired up by the caller. */
+  onboard?: Omit<OnboardDeps, 'register'> & { register: (input: RegisterInput, add: (cfg: ServiceConfig) => Promise<void>) => Promise<Registered> }
+  /** Where `addService` persists onboarded services (the gateway config file). */
+  configPath?: string
 }
 
 /** JSON-safe copy (bigints as decimal strings). */
@@ -54,18 +59,22 @@ export function provedToResponse(p: ProvedResponse): Response {
 }
 
 /** Checks every configured service against the chain and the attestor; refuses to start on mismatch. */
+/** A configured service checked against the chain: registered, settled by this attestor, same origin. */
+async function checkService(deps: GatewayDeps, signer: Address, cfg: ServiceConfig): Promise<Service> {
+  const s = await deps.chain.service(cfg.serviceId)
+  if (isAddressEqual(s.token, zeroAddress)) throw new Error(`service ${cfg.serviceId} is not registered on ${deps.chain.escrow}`)
+  if (!isAddressEqual(s.verifier, signer)) throw new Error(`service ${cfg.serviceId} is settled by ${s.verifier}, not this attestor (${signer})`)
+  if (originHash(cfg.upstream) !== s.originHash) throw new Error(`service ${cfg.serviceId}: upstream ${cfg.upstream} is not the registered origin`)
+  return { ...cfg, price: s.pricePerCall, token: s.token, window: s.settlementWindow }
+}
+
+/** Checks every configured service against the chain and the attestor; refuses to start on mismatch. */
 export async function loadServices(deps: GatewayDeps): Promise<Map<string, Service>> {
   const health = await deps.attestor.health()
   if (!isAddressEqual(health.escrow, deps.chain.escrow)) throw new Error(`attestor serves escrow ${health.escrow}, gateway ${deps.chain.escrow}`)
   if (health.chainId !== deps.chain.chainId) throw new Error(`attestor on chain ${health.chainId}, gateway on ${deps.chain.chainId}`)
   const out = new Map<string, Service>()
-  for (const cfg of deps.config.services) {
-    const s = await deps.chain.service(cfg.serviceId)
-    if (isAddressEqual(s.token, zeroAddress)) throw new Error(`service ${cfg.serviceId} is not registered on ${deps.chain.escrow}`)
-    if (!isAddressEqual(s.verifier, health.signer)) throw new Error(`service ${cfg.serviceId} is settled by ${s.verifier}, not this attestor (${health.signer})`)
-    if (originHash(cfg.upstream) !== s.originHash) throw new Error(`service ${cfg.serviceId}: upstream ${cfg.upstream} is not the registered origin`)
-    out.set(cfg.serviceId.toLowerCase(), { ...cfg, price: s.pricePerCall, token: s.token, window: s.settlementWindow })
-  }
+  for (const cfg of deps.config.services) out.set(cfg.serviceId.toLowerCase(), await checkService(deps, health.signer, cfg))
   return out
 }
 
@@ -350,7 +359,25 @@ export async function createGateway(deps: GatewayDeps) {
     app.use('/dashboard/*', serveStatic({ root: deps.dashboardDir, rewriteRequestPath: (p) => p.replace(/^\/dashboard/, '') }))
   }
 
-  if (deps.demo) publicRoutes(app, deps.demo)
+  /** Adds a service registered while running (onboarding): the same chain checks as at startup,
+   *  then it is served, listed, scored and exposed over MCP at once, and persisted to the config. */
+  async function addService(cfg: ServiceConfig) {
+    const { signer } = await attestor.health()
+    services.set(cfg.serviceId.toLowerCase(), await checkService(deps, signer, cfg))
+    if (deps.configPath) {
+      const { readFileSync, writeFileSync } = await import('node:fs')
+      const file = JSON.parse(readFileSync(deps.configPath, 'utf8')) as { services?: ServiceConfig[] }
+      file.services = [...(file.services ?? []).filter((s) => s.serviceId.toLowerCase() !== cfg.serviceId.toLowerCase()), cfg]
+      writeFileSync(deps.configPath, `${JSON.stringify(file, null, 2)}\n`)
+    }
+    log(`service ${cfg.serviceId} added (${cfg.upstream})`)
+  }
+  if (deps.onboard) {
+    const ob = deps.onboard
+    onboardRoutes(app, { ...ob, register: (input) => ob.register(input, addService) })
+  }
+
+  if (deps.demo) publicRoutes(app, { ...deps.demo, examplePath: (sid) => services.get(sid.toLowerCase())?.examplePath })
   else app.all('/demo/*', (c) => c.json({ enabled: false, error: 'public demo mode is off (GATEWAY_PUBLIC=1)' }, 404))
 
   const mcp = mcpHandler({
@@ -408,5 +435,5 @@ export async function createGateway(deps: GatewayDeps) {
     return done
   }
 
-  return { app, services, sweep, mppx }
+  return { app, services, sweep, mppx, addService }
 }

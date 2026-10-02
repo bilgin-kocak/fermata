@@ -3,14 +3,17 @@
 // Env: TEMPO_RPC_URL, FERMATA_ESCROW, ATTESTOR_URL, GATEWAY_PORT/HOST/REALM/STORAGE/SWEEP_MS override the
 // config file; GATEWAY_UPSTREAM_CA (vendor CA PEM) and GATEWAY_RESOLVE ("host:port=ip:port,…") are
 // only used by the unprotected `tempo` fallback, which calls the vendor directly.
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { serve } from '@hono/node-server'
 import { fetch as undiciFetch } from 'undici'
 import { Receipt } from 'mppx'
 import { Mppx } from 'mppx/client'
 import { createPublicClient, createWalletClient, http, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { fermata, tempoChain, tip20Abi, TOKENS } from '@fermata/sdk'
+import { fermata, fermataEscrowAbi, originHash, predicateHash, serviceId as makeServiceId, tempoChain, tip20Abi, TOKENS } from '@fermata/sdk'
+import { probeVendor } from './onboard.ts'
+import type { ServiceConfig } from './config.ts'
 import { createGateway } from './app.ts'
 import { HttpAttestor } from './attestor.ts'
 import { ViemChain } from './chain.ts'
@@ -73,6 +76,40 @@ async function demoDeps() {
   }
 }
 
+// Self-serve onboarding (public mode): the operator key registers vendors' services on-chain.
+function onboardDeps() {
+  if (process.env.GATEWAY_PUBLIC !== '1') return undefined
+  const predicateDir = required('ONBOARD_PREDICATE_DIR') // also passed to the attestor as a --predicate path
+  mkdirSync(predicateDir, { recursive: true })
+  const operator = createWalletClient({ account: privateKeyToAccount((process.env.ONBOARD_OPERATOR_PRIVATE_KEY || required('RELAYER_PRIVATE_KEY')) as Hex), chain: chainDef, transport: http(config.rpc) })
+  return {
+    trustProxy: process.env.GATEWAY_TRUST_PROXY === '1',
+    probe: (t: Parameters<typeof probeVendor>[0]) => probeVendor(t, { proxy: process.env.FERMATA_UPSTREAM_PROXY || undefined }),
+    register: async (
+      input: { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string },
+      add: (cfg: ServiceConfig) => Promise<void>,
+    ) => {
+      const sid = makeServiceId(operator.account.address, input.label)
+      const existing = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [sid] })
+      if (existing.token !== '0x0000000000000000000000000000000000000000') throw new Error(`label "${input.label}" is taken; pick another`)
+      const reference = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [config.services[0]!.serviceId] })
+      const { signer } = await attestor.health()
+      const ph = predicateHash(input.predicate)
+      writeFileSync(path.join(predicateDir, `${input.label}-${ph.slice(2, 10)}.json`), input.predicate)
+      const txHash = await operator.writeContract({
+        address: config.escrow,
+        abi: fermataEscrowAbi,
+        functionName: 'registerService',
+        args: [sid, input.payout, TOKENS.pathUSD as Address, input.price, 120, signer, ph, originHash(input.origin), reference.notaryKeyHash],
+      })
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+      if (receipt.status !== 'success') throw new Error(`registration reverted: ${txHash}`)
+      await add({ serviceId: sid, upstream: input.origin, examplePath: input.examplePath, summary: input.summary, tool: { name: input.toolName, description: input.summary, path: input.examplePath } })
+      return { serviceId: sid, txHash, endpoint: `/s/${sid}${input.examplePath}`, tool: input.toolName }
+    },
+  }
+}
+
 const gateway = await createGateway({
   config,
   chain: new ViemChain(publicClient, relayer, config.escrow, chainId),
@@ -84,6 +121,8 @@ const gateway = await createGateway({
   explorer: process.env.GATEWAY_EXPLORER === undefined ? undefined : process.env.GATEWAY_EXPLORER || null,
   fetchUpstream: async (url, init) => (await undiciFetch(url, { ...(init as object), dispatcher })) as unknown as Response,
   demo: await demoDeps(),
+  onboard: onboardDeps(),
+  configPath: process.env.GATEWAY_CONFIG ?? 'gateway.config.json',
 })
 self = gateway.app
 

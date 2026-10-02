@@ -50,45 +50,94 @@ pub fn key_from_env(var: &str) -> Result<[u8; 32]> {
 }
 
 /// Predicates by sha256 of their exact bytes: a directory of `*.json` files, or single files.
-#[derive(Clone, Debug, Default)]
+///
+/// A hash it does not know triggers one rescan of the same paths (at most once a second), so a
+/// predicate written for a newly onboarded service is picked up without a restart. The store is
+/// content-addressed: a new file can only add a predicate, never change an existing one's bytes.
+#[derive(Debug, Default)]
 pub struct PredicateStore {
-    by_hash: HashMap<[u8; 32], Vec<u8>>,
+    by_hash: std::sync::RwLock<HashMap<[u8; 32], Vec<u8>>>,
+    paths: Vec<std::path::PathBuf>,
+    last_scan: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 impl PredicateStore {
     pub fn load(paths: &[impl AsRef<Path>]) -> Result<Self> {
-        let mut store = Self::default();
-        for p in paths {
-            let p = p.as_ref();
+        let store = Self {
+            paths: paths.iter().map(|p| p.as_ref().to_path_buf()).collect(),
+            ..Self::default()
+        };
+        store.scan()?;
+        Ok(store)
+    }
+
+    fn scan(&self) -> Result<()> {
+        for p in &self.paths {
             if p.is_dir() {
                 for entry in std::fs::read_dir(p)? {
                     let path = entry?.path();
                     if path.extension().is_some_and(|e| e == "json") {
-                        store.add(std::fs::read(&path)?);
+                        self.add(std::fs::read(&path)?);
                     }
                 }
             } else {
-                store.add(std::fs::read(p).with_context(|| format!("reading {}", p.display()))?);
+                self.add(std::fs::read(p).with_context(|| format!("reading {}", p.display()))?);
             }
         }
-        Ok(store)
+        *self.last_scan.lock().unwrap() = Some(std::time::Instant::now());
+        Ok(())
     }
 
-    pub fn add(&mut self, bytes: Vec<u8>) -> [u8; 32] {
+    pub fn add(&self, bytes: Vec<u8>) -> [u8; 32] {
         let h = predicate_hash(&bytes);
-        self.by_hash.insert(h, bytes);
+        self.by_hash.write().unwrap().insert(h, bytes);
         h
     }
 
     pub fn get(&self, hash: &[u8; 32]) -> Option<Vec<u8>> {
-        self.by_hash.get(hash).cloned()
+        if let Some(b) = self.by_hash.read().unwrap().get(hash) {
+            return Some(b.clone());
+        }
+        let due = self
+            .last_scan
+            .lock()
+            .unwrap()
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1));
+        if due && !self.paths.is_empty() {
+            let _ = self.scan();
+            return self.by_hash.read().unwrap().get(hash).cloned();
+        }
+        None
     }
 
     pub fn len(&self) -> usize {
-        self.by_hash.len()
+        self.by_hash.read().unwrap().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.by_hash.is_empty()
+        self.len() == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picks_up_a_new_predicate_file_on_a_miss() {
+        let dir = std::env::temp_dir().join(format!("fermata-pred-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.json"), br#"{"version":1,"status":[200]}"#).unwrap();
+        let store = PredicateStore::load(&[&dir]).unwrap();
+        assert_eq!(store.len(), 1);
+        let b = br#"{"version":1,"status":[201]}"#;
+        std::fs::write(dir.join("b.json"), b).unwrap();
+        let h = predicate_hash(b);
+        *store.last_scan.lock().unwrap() = None; // as if a second had passed
+        assert_eq!(store.get(&h).as_deref(), Some(&b[..]));
+        assert_eq!(store.len(), 2);
+        // An unknown hash right after a scan does not rescan (rate limit) and is simply absent.
+        assert!(store.get(&[9u8; 32]).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

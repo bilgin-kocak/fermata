@@ -100,12 +100,13 @@ for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT $NOTARY_PORT; do wait_port "
 NOTARY_PUBLIC_KEY=$(grep -o '"notaryKey":"0x[0-9a-f]*"' "$DIR/notary.log" | cut -d'"' -f4)
 RESOLVE=()
 for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT; do RESOLVE+=(--resolve "vendor.fermata.test:$p=127.0.0.1:$p"); done
+mkdir -p "$DIR/predicates" # predicates written by self-serve onboarding (public mode)
 # Behind an egress proxy (like this build environment), real vendors are reached through a CONNECT
 # tunnel; local demo vendors (pinned with --resolve) never are.
 PROXY_ENV=(); UPSTREAM_PROXY=${FERMATA_UPSTREAM_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}
 [ -n "$UPSTREAM_PROXY" ] && PROXY_ENV=(FERMATA_UPSTREAM_PROXY="$UPSTREAM_PROXY")
 bg attestor env "${PROXY_ENV[@]}" VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
-  --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla --predicate apps/attestor/predicates --storage "$DIR/presentations" \
+  --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla --predicate apps/attestor/predicates --predicate "$DIR/predicates" --storage "$DIR/presentations" \
   --attempt-timeout-secs 10 "${RESOLVE[@]}"
 wait_port $ATTESTOR_PORT
 VERIFIER_ADDRESS=$(curl -s --noproxy '*' http://127.0.0.1:$ATTESTOR_PORT/healthz | jq -r .signer)
@@ -154,7 +155,9 @@ if [ "${PUBLIC:-0}" = 1 ]; then
     cast send -q --rpc-url "$RPC" --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
       0x20C0000000000000000000000000000000000000 'transfer(address,uint256)' "$(cast wallet address "$DEMO_AGENT_PRIVATE_KEY")" 10000000 > /dev/null
   fi
-  PUBLIC_ENV=(GATEWAY_PUBLIC=1 DEMO_AGENT_PRIVATE_KEY="${DEMO_AGENT_PRIVATE_KEY:?set DEMO_AGENT_PRIVATE_KEY in .env (a funded testnet key)}")
+  PUBLIC_ENV=(GATEWAY_PUBLIC=1 DEMO_AGENT_PRIVATE_KEY="${DEMO_AGENT_PRIVATE_KEY:?set DEMO_AGENT_PRIVATE_KEY in .env (a funded testnet key)}"
+    ONBOARD_PREDICATE_DIR="$PWD/$DIR/predicates" "${PROXY_ENV[@]}")
+  [ -n "${ONBOARD_OPERATOR_PRIVATE_KEY:-}" ] && PUBLIC_ENV+=(ONBOARD_OPERATOR_PRIVATE_KEY="$ONBOARD_OPERATOR_PRIVATE_KEY")
 fi
 
 echo "== gateway"

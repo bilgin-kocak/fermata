@@ -99,11 +99,12 @@ export function mcpHandler(deps: McpDeps) {
     methods: [deps.fermataHandler as never],
     transport: Transport.mcpSdk(),
   })
-  const tools = new Map([...deps.services.values()].map((svc) => [toolFor(svc).name, svc]))
+  // Computed per request: services onboarded while running appear at once.
+  const toolMap = () => new Map([...deps.services.values()].map((svc) => [toolFor(svc).name, svc]))
   const link = (tx?: string | null) => (tx && deps.explorer ? `${deps.explorer}/tx/${tx}` : tx ?? null)
 
   const listTools = (): Tool[] => [
-    ...[...tools.entries()].map(([name, svc]) => {
+    ...[...toolMap().entries()].map(([name, svc]) => {
       const tool = toolFor(svc)
       const names = params(tool.path)
       return {
@@ -183,7 +184,7 @@ export function mcpHandler(deps: McpDeps) {
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args = {}, _meta } = request.params
       if (FREE_TOOLS.some((t) => t.name === name)) return freeTool(name, args)
-      const svc = tools.get(name)
+      const svc = toolMap().get(name)
       if (!svc) return { content: [text(`unknown tool ${name}`)], isError: true }
       return paidTool(svc, args, _meta as Record<string, unknown> | undefined)
     })
