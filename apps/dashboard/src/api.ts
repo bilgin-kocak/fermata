@@ -60,6 +60,10 @@ export type VendorScore = {
 }
 export type Scores = { escrow: string; chainId: number; scannedTo: string; method: string; recompute: string; caveats: string[]; scores: VendorScore[] }
 
+export type DemoKind = { id: string; label: string; description: string; serviceId: string; path: string }
+export type DemoStatus = { enabled: boolean; readOnly: string | null; busy: boolean; remainingToday: number; perIpSeconds: number; payer: string | null; kinds: DemoKind[] }
+export type DemoResult = { kind: string; status?: number; callId?: string; outcome?: string | null; holdTx?: string; settleTx?: string | null; body?: string; error?: string; retryAfterMs?: number }
+
 export type Movement = { token: string; from: string; to: string; amount: string; txHash: string; blockNumber: string }
 export type Reconciliation = { callId: string; status: CallStatus; token: string; expected: string; match: boolean; movements: Movement[] }
 
@@ -86,6 +90,11 @@ export const api = {
   events: () => json<EscrowEvent[]>('/events?since=0'),
   services: () => json<Service[]>('/services'),
   scores: () => json<Scores>('/scores'),
+  demoStatus: () => fetch('/demo/status').then((r) => (r.ok ? (r.json() as Promise<DemoStatus>) : null)),
+  demoCall: async (kind: string): Promise<DemoResult> => {
+    const res = await fetch('/demo/call', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind }) })
+    return { kind, ...((await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as object) } as DemoResult
+  },
   reconcile: (callId: string) => json<Reconciliation>(`/reconcile/${callId}`),
   reverify: (callId: string) => json<Reverify>(`/proofs/${callId}/verify`, { method: 'POST' }),
   proofUrl: (callId: string) => `/proofs/${callId}`,

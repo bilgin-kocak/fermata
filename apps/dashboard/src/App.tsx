@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type Call, type EscrowEvent, type Info, type Reconciliation, type Reverify, type Scores, type Service } from './api.ts'
+import { api, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Reconciliation, type Reverify, type Scores, type Service } from './api.ts'
 import { STATUS, age, bytes, serviceLabel, short, usd } from './format.ts'
 
 type Tab = 'live' | 'vendors' | 'reconciliation' | 'services'
@@ -108,6 +108,64 @@ function Tiles({ calls, services }: { calls: Call[]; services?: Service[] }) {
           <div className="sub">{t.sub}</div>
         </div>
       ))}
+    </div>
+  )
+}
+
+/** Public mode: buttons that make a real paid call through the demo agent (POST /demo/call). */
+function TryIt({ status, calls, info, onOpen }: { status: DemoStatus; calls: Call[]; info?: Info; onOpen: (c: Call) => void }) {
+  const [running, setRunning] = useState<string>()
+  const [result, setResult] = useState<DemoResult>()
+  const run = async (kind: string) => {
+    setRunning(kind)
+    setResult(undefined)
+    try {
+      setResult(await api.demoCall(kind))
+    } finally {
+      setRunning(undefined)
+    }
+  }
+  const call = result?.callId ? calls.find((c) => c.callId === result.callId) : undefined
+  const disabled = !!running || !!status.readOnly || status.busy
+  return (
+    <div className="panel tryit">
+      <h2>
+        Try it <span className="muted">a real paid call on {info?.explorer ? 'Tempo testnet' : 'the local chain'}, paid by our demo agent</span>
+      </h2>
+      {status.readOnly ? <div className="note" style={{ margin: 14 }}>{status.readOnly}</div> : null}
+      <div className="tryit-grid">
+        {status.kinds.map((k) => (
+          <button key={k.id} className="tryit-btn" disabled={disabled} onClick={() => void run(k.id)} aria-busy={running === k.id}>
+            <b>{running === k.id ? 'Proving…' : k.label}</b>
+            <span className="muted">{k.description}</span>
+          </button>
+        ))}
+      </div>
+      {running ? <div className="note" style={{ margin: 14 }}>Holding the price in escrow, proving the vendor's answer with TLSNotary, settling… (a few seconds; the silent vendor waits for its 30 s window)</div> : null}
+      {result ? (
+        <div className="note" style={{ margin: 14 }} role="status">
+          {result.error ? (
+            <span>{result.error}</span>
+          ) : (
+            <>
+              <b>{result.outcome === 'DELIVERED' ? '✓ Released to the vendor' : result.outcome === 'FAILED' ? '↩ Refunded to the agent (proven failure)' : '⏳ No proof: refunded by the contract after the window'}</b>
+              {' · '}vendor answered HTTP {result.status}
+              {result.callId ? <> · call <span className="mono">{short(result.callId)}</span></> : null}
+              {' · '}hold <TxLink hash={result.holdTx} info={info} />
+              {result.settleTx ? <> · settle <TxLink hash={result.settleTx} info={info} /></> : null}
+              {call ? (
+                <>
+                  {' · '}
+                  <button onClick={() => onOpen(call)}>Open the proof</button>
+                </>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+      <footer className="foot" style={{ padding: '0 14px 12px' }}>
+        One call per visitor every {status.perIpSeconds} s · {status.remainingToday} demo calls left today · payer {status.payer ? short(status.payer) : '—'}
+      </footer>
     </div>
   )
 }
@@ -559,6 +617,7 @@ export function App() {
   const events = usePoll(api.events, 2_000).data ?? []
   const services = usePoll(api.services, 30_000).data
   const scores = usePoll(api.scores, 10_000).data
+  const demo = usePoll(api.demoStatus, 5_000).data
   useEffect(() => {
     location.hash = tab
   }, [tab])
@@ -596,6 +655,7 @@ export function App() {
           </button>
         ))}
       </nav>
+      {tab === 'live' && demo?.enabled ? <TryIt status={demo} calls={calls} info={info} onOpen={setOpen} /> : null}
       {tab === 'live' ? <LiveTab calls={calls} events={events} info={info} onOpen={setOpen} /> : null}
       {tab === 'reconciliation' ? <ReconciliationTab calls={calls} info={info} /> : null}
       {tab === 'vendors' ? <VendorsTab scores={scores} info={info} /> : null}

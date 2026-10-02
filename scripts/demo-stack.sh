@@ -74,7 +74,9 @@ fi
 
 if [ "$CHAIN" = anvil ]; then
   echo "== anvil + escrow"
-  bg anvil anvil --chain-id 42431 --port "$ANVIL_PORT" --silent
+  # Public mode mines a block every second, like a real chain, so settlement windows close on their own.
+  ANVIL_ARGS=(); [ "${PUBLIC:-0}" = 1 ] && ANVIL_ARGS=(--block-time 1)
+  bg anvil anvil --chain-id 42431 --port "$ANVIL_PORT" --silent "${ANVIL_ARGS[@]}"
   wait_port "$ANVIL_PORT"
   cp packages/sdk/src/deployments.json "$DIR/deployments.backup.json"
   bash scripts/deploy-escrow.sh --chain anvil --rpc "$RPC" > "$DIR/deploy.log" 2>&1 || { tail -20 "$DIR/deploy.log"; exit 1; }
@@ -135,13 +137,33 @@ case ",$REAL_VENDORS," in *,coinbase,*)
     "Coinbase spot price for a pair such as BTC-USD, from the real public Coinbase API." \
     get_spot_price '/v2/prices/{pair}/spot' /v2/prices/BTC-USD/spot) ;; esac
 
+# Public "try it" mode (PUBLIC=1): the demo buttons and the server-side demo agent that pays for them.
+PUBLIC_ENV=()
+if [ "${PUBLIC:-0}" = 1 ]; then
+  echo "== public demo mode"
+  KINDS=$(jq -n --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" --arg npm "$SERVICE_NPM" '
+    {reliable: {serviceId: $ok, path: "/v1/quote?symbol=BTC-USD", label: "Reliable vendor", description: "A quote API that answers correctly: the proof passes and the vendor is paid."},
+     broken: {serviceId: $e500, path: "/v1/quote?symbol=ETH-USD", label: "Broken vendor", description: "Answers HTTP 500: the proof shows the failure and you are refunded."},
+     silent: {serviceId: $hang, path: "/v1/quote?symbol=SOL-USD", label: "Silent vendor", description: "Never answers: no proof, no verdict; the contract refunds after the 30 s window."}}
+    + (if $npm == "" then {} else
+      {npm: {serviceId: $npm, path: "/-/package/mppx/dist-tags", label: "Real API: npm registry", description: "The public npm registry over the open internet: a real 200, proved and paid."},
+       "npm-404": {serviceId: $npm, path: "/-/package/no-such-package-fermata-zz/dist-tags", label: "Real API: npm 404", description: "npm\u0027s genuine 404 for a missing package: proved, and refunded."}} end)')
+  jq --argjson kinds "$KINDS" '.demo = {kinds: $kinds, perIpSeconds: (env.DEMO_PER_IP_SECONDS // "20" | tonumber), dailyCap: (env.DEMO_DAILY_CAP // "500" | tonumber)}' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+  if [ "$CHAIN" = anvil ]; then
+    DEMO_AGENT_PRIVATE_KEY=$(cast wallet new --json | jq -r '(.data // .) | if type == "array" then .[0] else . end | .private_key')
+    cast send -q --rpc-url "$RPC" --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+      0x20C0000000000000000000000000000000000000 'transfer(address,uint256)' "$(cast wallet address "$DEMO_AGENT_PRIVATE_KEY")" 10000000 > /dev/null
+  fi
+  PUBLIC_ENV=(GATEWAY_PUBLIC=1 DEMO_AGENT_PRIVATE_KEY="${DEMO_AGENT_PRIVATE_KEY:?set DEMO_AGENT_PRIVATE_KEY in .env (a funded testnet key)}")
+fi
+
 echo "== gateway"
-GATEWAY_CONFIG=$CONFIG GATEWAY_PORT=$GATEWAY_PORT GATEWAY_STORAGE=$DIR/calls GATEWAY_SWEEP_MS=2000 GATEWAY_REALM=127.0.0.1 \
+bg gateway env "${PUBLIC_ENV[@]}" GATEWAY_CONFIG=$CONFIG GATEWAY_PORT=$GATEWAY_PORT GATEWAY_STORAGE=$DIR/calls GATEWAY_SWEEP_MS=2000 GATEWAY_REALM=127.0.0.1 \
   TEMPO_RPC_URL=$RPC FERMATA_ESCROW=$ESCROW ATTESTOR_URL=http://127.0.0.1:$ATTESTOR_PORT GATEWAY_EXPLORER=$EXPLORER \
   GATEWAY_FROM_BLOCK=$(jq -r ".FermataEscrow.networks.$CHAIN.deployBlock // 0" packages/sdk/src/deployments.json) \
   RELAYER_PRIVATE_KEY=$RELAYER_KEY GATEWAY_SECRET_KEY=$SECRET GATEWAY_UPSTREAM_CA=$CA \
   GATEWAY_RESOLVE=vendor.fermata.test:$QUOTE_PORT=127.0.0.1:$QUOTE_PORT \
-  bg gateway "$TSX" apps/gateway/src/main.ts
+  "$TSX" apps/gateway/src/main.ts
 wait_port "$GATEWAY_PORT" || { cat "$DIR/gateway.log"; exit 1; }
 
 jq -n --arg chain "$CHAIN" --arg rpc "$RPC" --arg escrow "$ESCROW" --arg gateway "http://127.0.0.1:$GATEWAY_PORT" \

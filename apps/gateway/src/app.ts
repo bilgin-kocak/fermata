@@ -10,6 +10,7 @@ import type { Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
 import { mcpHandler, toolFor } from './mcp.ts'
+import { publicRoutes, type DemoDeps } from './public.ts'
 import { FINAL, type CallRecord, type CallStore } from './store.ts'
 
 export type GatewayDeps = {
@@ -29,6 +30,8 @@ export type GatewayDeps = {
   dashboardDir?: string
   /** Explorer base URL for links (Moderato: https://explore.testnet.tempo.xyz; none on Anvil). */
   explorer?: string | null
+  /** Public "try it" mode (hosted demo); off when absent. */
+  demo?: DemoDeps
 }
 
 /** JSON-safe copy (bigints as decimal strings). */
@@ -346,6 +349,9 @@ export async function createGateway(deps: GatewayDeps) {
     app.get('/dashboard', (c) => c.redirect('/dashboard/'))
     app.use('/dashboard/*', serveStatic({ root: deps.dashboardDir, rewriteRequestPath: (p) => p.replace(/^\/dashboard/, '') }))
   }
+
+  if (deps.demo) publicRoutes(app, deps.demo)
+  else app.all('/demo/*', (c) => c.json({ enabled: false, error: 'public demo mode is off (GATEWAY_PUBLIC=1)' }, 404))
 
   const mcp = mcpHandler({
     app, services, escrow: chain.escrow, chainId: chain.chainId, secretKey: deps.secretKey, realm: deps.config.realm,
