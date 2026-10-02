@@ -12,7 +12,7 @@
     "contracts:test": "cd contracts && forge test && FOUNDRY_PROFILE=tempo forge test --network tempo",
     "sdk:test": "pnpm -F @fermata/sdk test",
     "test": "pnpm contracts:test && pnpm sdk:test",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -F @fermata/sdk typecheck && pnpm -F @fermata/gateway typecheck",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -F @fermata/sdk typecheck && pnpm -F @fermata/gateway typecheck && pnpm -F @fermata/mcp typecheck",
     "keys:init": "tsx scripts/keys-init.ts",
     "escrow:deploy": "bash scripts/deploy-escrow.sh",
     "escrow:roundtrip": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/escrow-roundtrip.ts",
@@ -26,10 +26,13 @@
     "demo:cases": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/cases.ts",
     "demo:agent": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/agent.ts",
     "demo:load": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/agent.ts --service quote --load",
-    "service:register": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/register-service.ts"
+    "service:register": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/register-service.ts",
+    "demo:mcp": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/mcp.ts",
+    "mcp": "tsx apps/mcp/src/index.ts"
   },
   "devDependencies": {
     "@fermata/sdk": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@types/node": "^22.19.0",
     "mppx": "0.11.0",
     "tsx": "^4.23.15",

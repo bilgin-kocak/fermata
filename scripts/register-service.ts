@@ -87,6 +87,10 @@ config.services.push({
   summary: str('summary', `${str('label')} (${upstream})`),
   ...(typeof args['tempo-amount'] === 'string' ? { tempo: { amount: args['tempo-amount'], recipient: vendor.address } } : {}),
   ...(typeof args['upstream-auth-env'] === 'string' ? { upstreamAuth: { header: 'Authorization', env: args['upstream-auth-env'] } } : {}),
+  // How the service appears on the gateway's MCP endpoint (`--tool-name get_quote --tool-path '/v1/quote?symbol={symbol}'`).
+  ...(typeof args['tool-name'] === 'string'
+    ? { tool: { name: args['tool-name'], path: str('tool-path', '{path}'), description: str('summary', '') || undefined } }
+    : {}),
 })
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
 console.log(sid)
