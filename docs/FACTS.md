@@ -270,6 +270,12 @@ Verification (offline, no network, no `getrandom`): `Presentation::verify(&Crypt
 | Clock | prover/notary clock skew ≤ 5 s | `crates/mpc-tls/src/follower.rs:33` |
 | Demo vendor consequence | Node `https` server (not http2) with `minVersion`/`maxVersion: 'TLSv1.2'`, `ciphers: 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256'`, `ecdhCurve: 'prime256v1'`, `honorCipherOrder: true`, tickets/compression/renegotiation off, `Content-Length` + `Connection: close`, P-256 ECDSA leaf with SAN `DNS:vendor.fermata.test` from a local CA | — |
 
+**Real hosts (probed 2026-10-02 with `scripts/probe-tls.sh`, OpenSSL restricted to the profile above and to Mozilla's roots, through this environment's egress proxy).**
+- `registry.npmjs.org` negotiates `ECDHE-ECDSA-AES128-GCM-SHA256` on prime256v1, with a Google Trust Services certificate; it is proved end to end (§15.6).
+- `raw.githubusercontent.com` passes the probe too: `ECDHE-RSA-AES128-GCM-SHA256`, Let's Encrypt.
+- `api.github.com` is TLS-intercepted by the egress proxy (issuer "CCR agent-proxy interception CA"). The probe fails with "self-signed certificate in certificate chain", and a real prove attempt fails with `UnknownIssuer` and no transcript, as it must.
+- `api.coinbase.com`, `api.kraken.com`, `api.coingecko.com` and `api.binance.com` are refused by the proxy here, so they are untested from this environment.
+
 ### 12.5 Cost and performance (published; localhost numbers in §15)
 
 | Fact | Value | Source |
@@ -509,4 +515,25 @@ the same commands as on Anvil and `--chain moderato`. Explorer links are in the 
 Compared with Anvil (§15.4) proving is the same (≈ 1 s, it never touches the chain); the extra
 ≈ 5 s per call is two sequential transaction inclusions. Pipelining calls (several holds in flight)
 or session escrow (one hold for N calls, roadmap) are the levers, not the prover.
+
+### 15.6 A real third-party vendor: registry.npmjs.org (2026-10-02)
+
+The setup:
+- the public npm registry API `GET /-/package/<name>/dist-tags`;
+- proved with TLSNotary through our notary, with `--roots mozilla`;
+- over the internet, through this environment's HTTP CONNECT egress proxy (`--upstream-proxy`);
+- 4 vCPU, with prover and notary on the same box.
+
+| Measurement | Value |
+|---|---|
+| Prove time (CLI, one call) | 1.95 s (`mppx` → 200, 54-byte JSON body) |
+| Prove time through the full stack (`pnpm demo:real`) | 2.0 s, 2.4 s, 2.8 s for three calls; localhost demo vendor p50 ≈ 1.1–1.3 s (§15.4) |
+| MPC traffic prover ↔ notary | 65.9 MB per call, the same as localhost: the fixed MPC cost dominates |
+| Transcript | 224 B sent, 756 B received (Cloudflare headers + body) |
+| Offline re-verification, Mozilla roots | ok; DELIVERED for a real 200, FAILED for npm's real 404; the same proof against the demo CA alone is rejected ("failed to verify certificate path") |
+| `pnpm demo:real --chain anvil` | **3/3 PASS**: npm 200 → released; npm 404 → refunded; npm as an MCP tool (`npm_latest_version`) → released; each proof re-verified offline and reconciled by memo |
+| Integration test | `cargo test --release --test attest real_vendor_npm -- --ignored`: pass (2.3 s) |
+
+The notary is still ours (trust model unchanged). Coinbase was not reachable from here; Bilgin runs
+`scripts/probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`, then `REAL_VENDORS=npm,coinbase`.
 

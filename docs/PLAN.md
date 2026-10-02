@@ -273,6 +273,17 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
   plus the ERC-8183 mapping. Checked against their repos and the ERC text; x402r and the x402
   escrow proposal weren't reachable from here, so they are left out.
 - [ ] MCP on Moderato: same commands with a Moderato gateway (Bilgin, outside this environment).
+- [x] **A real third-party vendor (2026-10-02).**
+  - Attestor: `--roots mozilla` uses tlsn's `mozilla-certs` feature; `webpki-root-certs` was already
+    in the tree, so no new crate. `--upstream-proxy` is an HTTP CONNECT tunnel for the vendor socket
+    only.
+  - The npm registry is a demo-stack service with MCP tool `npm_latest_version`.
+  - `pnpm demo:real`: 3/3 on Anvil (200 released, real 404 refunded, MCP).
+  - New tests: the `real_vendor_npm` integration test and 4 tunnel unit tests.
+  - `scripts/probe-tls.sh` checks a host against TLSNotary's profile and Mozilla's roots.
+- [ ] Coinbase: `bash scripts/probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`, then
+  `REAL_VENDORS=npm,coinbase bash scripts/demo-stack.sh up --chain moderato && pnpm demo:real --chain moderato`
+  (Bilgin; this environment can't reach Coinbase).
 
 ## Reused from WebProof (bilgin-kocak/webproof-solana @ 609a654, Apache-2.0)
 

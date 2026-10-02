@@ -146,6 +146,7 @@ bash scripts/demo-stack.sh up --chain anvil    # vendors, notary, attestor, gate
 pnpm demo:cases --chain anvil                  # the three canonical cases, pass/fail table
 pnpm demo:load --calls 100 --chain anvil       # ≈97/3, timings, MPC bandwidth, gas
 pnpm demo:mcp --chain anvil                    # an MCP agent pays on proof: released, refunded, verified
+pnpm demo:real --chain anvil                   # a real third-party API (registry.npmjs.org): 200 released, 404 refunded
 open http://127.0.0.1:4300/dashboard           # live feed, proof drawer, reconciliation by memo
 bash scripts/demo-stack.sh down
 ```
@@ -161,6 +162,18 @@ downloadable, offline-re-verifiable proof:
    the settlement window the hold is reclaimed to the agent.
 
 ![The dashboard after a recorded 100-call run: 95 released, 5 refunded, 0 awaiting timeout](docs/img/video-load-end.png)
+
+**Real third-party vendor.** Fermata is not tied to our mock vendor. The demo stack also registers
+the public **npm registry** (`registry.npmjs.org`):
+- the attestor proves its TLS session through our notary, and the certificate is checked against
+  Mozilla's root program;
+- `pnpm demo:real` checks three cases (3/3 PASS):
+  1. a real 200 → **released**;
+  2. npm's real **404** for a package that doesn't exist → **refunded**;
+  3. the same API as an MCP tool → released.
+- A proof takes ≈ 2 s over the internet, with the same 66 MB of MPC traffic (FACTS §15.6).
+- Any host that fits TLSNotary's TLS 1.2 profile works. `scripts/probe-tls.sh <host>` checks one
+  first (for example, api.coinbase.com for `REAL_VENDORS=npm,coinbase`).
 
 The video storyboard, voice-over and raw-footage recorder are in [`docs/DEMO.md`](docs/DEMO.md).
 
@@ -251,6 +264,7 @@ bash scripts/demo-stack.sh up --chain anvil     # first run builds the attestor 
 pnpm demo:cases --chain anvil
 pnpm demo:load --calls 100 --chain anvil
 pnpm demo:mcp --chain anvil                     # MCP agent: released / refunded / verified (see apps/mcp)
+pnpm demo:real --chain anvil                    # real vendor (registry.npmjs.org): released / refunded
 open http://127.0.0.1:4300/dashboard
 bash scripts/demo-stack.sh down
 
