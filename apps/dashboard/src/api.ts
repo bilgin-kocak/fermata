@@ -40,6 +40,48 @@ export type Service = {
   unprotectedFallback: { amount: string; recipient: string } | null
 }
 
+export type VendorScore = {
+  serviceId: string
+  label: string | null
+  known: boolean
+  upstream: string | null
+  summary: string | null
+  tool: string | null
+  held: number
+  released: number
+  provenFailures: number
+  timeouts: number
+  open: number
+  settled: number
+  deliveryRate: number | null
+  score: number
+  distinctAgents: number
+  fewCalls: boolean
+}
+export type Scores = { escrow: string; chainId: number; scannedTo: string; method: string; recompute: string; caveats: string[]; scores: VendorScore[] }
+
+export type DemoKind = { id: string; label: string; description: string; serviceId: string; path: string }
+export type DemoStatus = { enabled: boolean; readOnly: string | null; busy: boolean; remainingToday: number; perIpSeconds: number; payer: string | null; kinds: DemoKind[] }
+export type DemoResult = { kind: string; status?: number; callId?: string; outcome?: string | null; holdTx?: string; settleTx?: string | null; body?: string; error?: string; retryAfterMs?: number }
+
+export type Predicate = {
+  version: 1
+  status: number[]
+  maxBodyBytes: number
+  contentType?: string
+  jsonSchema?: { type: 'object'; required: string[]; properties: Record<string, { type: string }> }
+}
+export type ProbeResult = {
+  ok: boolean
+  error?: string
+  origin?: string
+  examplePath?: string
+  warnings?: string[]
+  predicate?: Predicate
+  sample?: { status: number; contentType: string | null; bodyBytes: number; body: string; tls: { protocol: string | null; cipher: string; group: string | null; issuer: string | null } }
+}
+export type RegisterResult = { ok?: boolean; error?: string; serviceId?: string; txHash?: string; endpoint?: string; tool?: string }
+
 export type Movement = { token: string; from: string; to: string; amount: string; txHash: string; blockNumber: string }
 export type Reconciliation = { callId: string; status: CallStatus; token: string; expected: string; match: boolean; movements: Movement[] }
 
@@ -65,6 +107,20 @@ export const api = {
   calls: () => json<Call[]>('/calls'),
   events: () => json<EscrowEvent[]>('/events?since=0'),
   services: () => json<Service[]>('/services'),
+  scores: () => json<Scores>('/scores'),
+  demoStatus: () => fetch('/demo/status').then((r) => (r.ok ? (r.json() as Promise<DemoStatus>) : null)),
+  demoCall: async (kind: string, serviceId?: string): Promise<DemoResult> => {
+    const res = await fetch('/demo/call', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(serviceId ? { serviceId } : { kind }) })
+    return { kind, ...((await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as object) } as DemoResult
+  },
+  probe: async (url: string): Promise<ProbeResult> => {
+    const res = await fetch('/onboard/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }) })
+    return (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as ProbeResult
+  },
+  register: async (body: Record<string, unknown>): Promise<RegisterResult> => {
+    const res = await fetch('/onboard/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    return (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as RegisterResult
+  },
   reconcile: (callId: string) => json<Reconciliation>(`/reconcile/${callId}`),
   reverify: (callId: string) => json<Reverify>(`/proofs/${callId}/verify`, { method: 'POST' }),
   proofUrl: (callId: string) => `/proofs/${callId}`,

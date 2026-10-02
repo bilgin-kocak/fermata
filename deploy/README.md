@@ -1,0 +1,69 @@
+# Hosting the public demo
+
+This is a public, always-on Fermata on **Tempo Moderato testnet**. Visitors get:
+- **Try it** buttons, which make real paid calls through a demo agent;
+- the **Vendors** scoreboard;
+- **List your API**, self-serve onboarding.
+
+Only the gateway is exposed, behind Caddy with automatic HTTPS. The notary, attestor and mock vendors listen on 127.0.0.1.
+
+## What you need
+
+- **A VM:** Ubuntu 24.04, 4 vCPU / 8 GB, ports 80 and 443 open. Any provider works (Hetzner CX32, DigitalOcean, AWS t3.xlarge…).
+- **A host name:** a domain with an A record pointing at the VM, or none at all (`auto` uses `<ip>.sslip.io`).
+- **Testnet keys:** your Moderato `.env`. Copying it keeps the escrow and services already registered. Or make fresh keys on the VM with `pnpm keys:init`.
+
+## Three commands
+
+```sh
+# 1. install toolchains, clone, build (≈ 10 min the first time: the attestor is Rust)
+curl -fsSL https://raw.githubusercontent.com/bilgin-kocak/fermata/main/deploy/install.sh | sudo bash
+
+# 2. keys: either copy your Moderato .env …
+sudo install -m 600 -o fermata -g fermata ./.env /opt/fermata/.env
+#    … or create fresh testnet keys
+sudo -u fermata -H bash -lc 'cd /opt/fermata && pnpm keys:init'
+
+# 3. host name, faucet top-up, HTTPS, start, smoke test
+sudo bash /opt/fermata/deploy/bootstrap.sh fermata.example.com     # or: auto
+```
+
+`bootstrap.sh` ends by running `deploy/smoke.sh` against the public URL and printing it, for example `https://fermata.example.com/dashboard/`.
+
+## Running it
+
+| | |
+|---|---|
+| Status, logs | `systemctl status fermata` · `journalctl -u fermata -f` · component logs in `/opt/fermata/out/demo/*.log` |
+| Restart | `sudo systemctl restart fermata` (re-registers nothing that exists; keeps state) |
+| Update | `sudo bash /opt/fermata/deploy/install.sh && sudo systemctl restart fermata` |
+| Is it working? | `bash /opt/fermata/deploy/smoke.sh https://<host>` |
+| Testnet funds | `sudo -u fermata -H bash -lc 'cd /opt/fermata && pnpm fund'`; the gateway also tops up the demo agent and relayer itself, and turns the demo read-only rather than failing |
+| Recompute the scoreboard | `pnpm scores --chain moderato` (from any machine; reads only the chain) |
+| Settings | `/etc/fermata/fermata.env`: limits (`DEMO_PER_IP_SECONDS`, `DEMO_DAILY_CAP`), `REAL_VENDORS` |
+| State | `/var/lib/fermata/state`: calls, proofs, onboarded vendors (survive restarts) |
+
+## How it fits together
+
+```
+internet ──443──▶ Caddy (TLS) ──▶ gateway 127.0.0.1:4300 ──▶ attestor 127.0.0.1:7348 ──▶ notary 127.0.0.1:7347
+                                    │  /dashboard /demo/* /onboard/* /scores /mcp /s/:serviceId/*     │
+                                    └──── Tempo Moderato RPC ◀──────────────────────────────┘  vendors: 127.0.0.1:884x, registry.npmjs.org
+```
+
+- `fermata.service` runs `scripts/demo-stack.sh run --chain moderato`: the same stack as local development, supervised. If any component dies, the whole stack stops and systemd restarts it after 15 s.
+- Public mode limits:
+  - one demo call per visitor every 20 s;
+  - one call in flight;
+  - 500 demo calls a day;
+  - onboarding: 20 checks per hour and 3 registrations per day per address, 20 registrations a day in total.
+- Onboarding only fetches public HTTPS hosts on port 443. Private, loopback, link-local and metadata addresses are refused.
+
+## If something is wrong
+
+- **The gateway doesn't come up:** `journalctl -u fermata -n 200`. Usually it's a key with no funds (`pnpm fund`), or the Moderato RPC being unreachable.
+- **HTTPS fails:** the DNS name must point at the VM and ports 80/443 must be open (`journalctl -u caddy`).
+- **The demo says "paused":** the faucet couldn't top up the demo agent or relayer. Run `pnpm fund`, then wait a minute.
+- **Fallback without systemd:** `sudo -u fermata -H bash -lc 'cd /opt/fermata && PUBLIC=1 bash scripts/demo-stack.sh up --chain moderato'`, with Caddy as above.
+
+These scripts were tested locally (Anvil, public mode, `run` supervision, `smoke.sh`, shellcheck clean). They first run on a real VM on yours, and `smoke.sh` tells you in a minute whether it works.

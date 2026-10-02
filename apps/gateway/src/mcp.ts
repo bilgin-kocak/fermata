@@ -68,6 +68,12 @@ export function targetFor(tool: ToolConfig, args: Record<string, unknown>): stri
 
 const FREE_TOOLS: Tool[] = [
   {
+    name: 'fermata_vendor_scores',
+    description:
+      "Free. Every vendor's proven delivery record, computed only from on-chain escrow events: calls released, refunded on a proven failure, refunded on timeout, distinct agents, and a score (Wilson 95 % lower bound of the delivery rate). Use it to pick the most reliable service before paying; each service lists its MCP tool name.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'fermata_call',
     description: 'Free. The record of a Fermata call: status (held, released, refunded, awaiting-timeout, timed-out), outcome, transactions, proof hash.',
     inputSchema: { type: 'object', properties: { callId: { type: 'string', description: '0x… call id from a paid tool result' } }, required: ['callId'] },
@@ -93,11 +99,12 @@ export function mcpHandler(deps: McpDeps) {
     methods: [deps.fermataHandler as never],
     transport: Transport.mcpSdk(),
   })
-  const tools = new Map([...deps.services.values()].map((svc) => [toolFor(svc).name, svc]))
+  // Computed per request: services onboarded while running appear at once.
+  const toolMap = () => new Map([...deps.services.values()].map((svc) => [toolFor(svc).name, svc]))
   const link = (tx?: string | null) => (tx && deps.explorer ? `${deps.explorer}/tx/${tx}` : tx ?? null)
 
   const listTools = (): Tool[] => [
-    ...[...tools.entries()].map(([name, svc]) => {
+    ...[...toolMap().entries()].map(([name, svc]) => {
       const tool = toolFor(svc)
       const names = params(tool.path)
       return {
@@ -118,6 +125,12 @@ export function mcpHandler(deps: McpDeps) {
   ]
 
   async function freeTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (name === 'fermata_vendor_scores') {
+      const res = await deps.app.request('/scores')
+      const body = (await res.json()) as { scores: { label: string | null; tool: string | null; released: number; settled: number; deliveryRate: number | null; score: number; provenFailures: number; timeouts: number; distinctAgents: number; fewCalls: boolean }[] }
+      const lines = body.scores.map((s) => `${s.tool ?? s.label ?? '?'}: ${s.released}/${s.settled} delivered${s.deliveryRate === null ? '' : ` (${(s.deliveryRate * 100).toFixed(0)} %)`}, score ${(s.score * 100).toFixed(1)} %, ${s.provenFailures} proven failures, ${s.timeouts} timeouts, ${s.distinctAgents} agents${s.fewCalls ? ', few calls' : ''}`)
+      return { content: [text(lines.join('\n') || 'no calls yet')], structuredContent: body as unknown as Record<string, unknown>, isError: !res.ok }
+    }
     const callId = String(args.callId ?? '')
     if (!/^0x[0-9a-fA-F]{64}$/.test(callId)) return { content: [text('callId must be a 0x-prefixed 32-byte hex string')], isError: true }
     const route = name === 'fermata_call' ? `/calls/${callId}` : name === 'fermata_verify' ? `/proofs/${callId}/verify` : `/reconcile/${callId}`
@@ -171,7 +184,7 @@ export function mcpHandler(deps: McpDeps) {
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args = {}, _meta } = request.params
       if (FREE_TOOLS.some((t) => t.name === name)) return freeTool(name, args)
-      const svc = tools.get(name)
+      const svc = toolMap().get(name)
       if (!svc) return { content: [text(`unknown tool ${name}`)], isError: true }
       return paidTool(svc, args, _meta as Record<string, unknown> | undefined)
     })

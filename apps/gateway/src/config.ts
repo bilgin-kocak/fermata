@@ -14,6 +14,8 @@ export type ServiceConfig = {
   summary?: string
   /** How the service appears as a paid tool on the gateway's MCP endpoint (default: `call_<label>` with a raw `path`). */
   tool?: { name: string; description?: string; path: string }
+  /** Added by self-serve onboarding: skipped with a warning (not fatal) if it no longer checks out. */
+  onboarded?: boolean
   /** Unprotected fallback: plain `tempo` charge paid straight to the vendor, no proof. */
   tempo?: { amount: string; recipient: Address }
 }
@@ -27,6 +29,10 @@ export type GatewayConfig = {
   attestorUrl: string
   storageDir: string
   sweepIntervalMs: number
+  /** Public "try it" demo (enabled with GATEWAY_PUBLIC=1). */
+  demo?: import('./public.ts').DemoConfig
+  /** First block to scan for vendor scores (the escrow's deploy block). */
+  fromBlock?: number
   services: ServiceConfig[]
 }
 
@@ -42,7 +48,9 @@ export function loadConfig(path = process.env.GATEWAY_CONFIG ?? 'gateway.config.
     attestorUrl: process.env.ATTESTOR_URL ?? file.attestorUrl ?? 'http://127.0.0.1:7048',
     storageDir: process.env.GATEWAY_STORAGE ?? file.storageDir ?? 'storage/calls',
     sweepIntervalMs: Number(process.env.GATEWAY_SWEEP_MS ?? file.sweepIntervalMs ?? 10_000),
+    fromBlock: Number(process.env.GATEWAY_FROM_BLOCK ?? file.fromBlock ?? 0),
     services: file.services ?? [],
+    demo: file.demo,
   }
   if (!cfg.escrow) throw new Error('escrow address missing (FERMATA_ESCROW or config.escrow)')
   if (cfg.services.length === 0) throw new Error('no services configured')

@@ -65,6 +65,10 @@ class FakeChain implements GatewayChain {
   async events(_: bigint) {
     return this.settled.map((x) => ({ event: x.outcome === 1 ? 'Released' : 'Refunded', callId: x.callId, serviceId: sid, blockNumber: 2n, txHash: keccak256(toHex(`settle-${x.callId}`)), args: {} })) as never
   }
+  scoringLogs: import('@fermata/sdk').EscrowLog[] = []
+  async escrowLogs(fromBlock: bigint) {
+    return { logs: this.scoringLogs.filter((l) => l.blockNumber >= fromBlock), toBlock: 100n }
+  }
   async movements(_: Address, callId: Hex) {
     const tx = keccak256(toHex('m'))
     const hold = { token, from: agent, to: escrow, amount: 10_000n, txHash: tx, blockNumber: 1n }
@@ -316,7 +320,7 @@ type ToolResult = { content: { type: string; text: string }[]; isError?: boolean
 describe('gateway MCP endpoint', () => {
   it('lists every service as a paid tool plus the free fermata_* tools', async () => {
     const { tools } = await (await mcpClient(false)).listTools()
-    expect(tools.map((t) => t.name)).toEqual(['call_quote', 'fermata_call', 'fermata_verify', 'fermata_reconcile'])
+    expect(tools.map((t) => t.name)).toEqual(['call_quote', 'fermata_vendor_scores', 'fermata_call', 'fermata_verify', 'fermata_reconcile'])
     const quote = tools[0]!
     expect(quote.inputSchema).toMatchObject({ required: ['path'] })
     expect(quote.description).toContain('released to the vendor only if a TLSNotary proof')
@@ -386,6 +390,70 @@ describe('gateway MCP endpoint', () => {
     expect(recon.structuredContent).toMatchObject({ match: true })
     const bad = (await client.callTool({ name: 'fermata_call', arguments: { callId: 'nope' } })) as unknown as ToolResult
     expect(bad.isError).toBe(true)
+  })
+})
+
+describe('vendor scores', () => {
+  it('GET /scores aggregates on-chain events, labels known services and states its caveats', async () => {
+    const other = makeServiceId(agent, 'stranger')
+    const held = (callId: Hex, svc: Hex, block: bigint) => ({ eventName: 'Held' as const, blockNumber: block, transactionHash: callId, args: { callId, serviceId: svc, agent, amount: 10_000n } })
+    const c1 = keccak256(toHex('c1')), c2 = keccak256(toHex('c2')), c3 = keccak256(toHex('c3'))
+    chain.scoringLogs = [
+      held(c1, sid, 1n), { eventName: 'Released', blockNumber: 2n, transactionHash: c1, args: { callId: c1, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: c1 } },
+      held(c2, sid, 3n), { eventName: 'Refunded', blockNumber: 4n, transactionHash: c2, args: { callId: c2, serviceId: sid, amount: 10_000n, presentationHash: `0x${'00'.repeat(32)}` } },
+      held(c3, other, 5n),
+    ]
+    const body = (await (await gw.app.request(`${BASE}/scores`)).json()) as { scores: Record<string, unknown>[]; caveats: string[]; scannedTo: string }
+    expect(body.scannedTo).toBe('100')
+    expect(body.caveats.join(' ')).toContain('pay itself')
+    const mine = body.scores.find((s) => s.serviceId === sid)!
+    expect(mine).toMatchObject({ known: true, label: 'quote', upstream, released: 1, timeouts: 1, settled: 2, deliveryRate: 0.5, fewCalls: true, distinctAgents: 1 })
+    expect(body.scores.find((s) => s.serviceId === other)).toMatchObject({ known: false, label: 'stranger', open: 1, deliveryRate: null })
+  })
+
+  it('MCP fermata_vendor_scores summarises the same numbers for an agent', async () => {
+    const c1 = keccak256(toHex('m1'))
+    chain.scoringLogs = [
+      { eventName: 'Held', blockNumber: 1n, transactionHash: c1, args: { callId: c1, serviceId: sid, agent, amount: 10_000n } },
+      { eventName: 'Released', blockNumber: 2n, transactionHash: c1, args: { callId: c1, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: c1 } },
+    ]
+    const res = (await (await mcpClient(false)).callTool({ name: 'fermata_vendor_scores', arguments: {} })) as unknown as ToolResult
+    expect(res.content[0]!.text).toContain('call_quote: 1/1 delivered (100 %)')
+  })
+})
+
+
+describe('addService (onboarding)', () => {
+  it('serves, lists, exposes over MCP and persists a service registered while running', async () => {
+    const { writeFileSync, readFileSync } = await import('node:fs')
+    const cfgPath = path.join(mkdtempSync(path.join(tmpdir(), 'fermata-cfg-')), 'gateway.config.json')
+    writeFileSync(cfgPath, JSON.stringify({ escrow, services: config().services }))
+    store = new CallStore(mkdtempSync(path.join(tmpdir(), 'fermata-gw-')))
+    gw = await createGateway({
+      config: { ...config(), storageDir: store.dir }, chain, publicClient: chain.publicClient(), attestor, store,
+      secretKey: 'unit-test-secret-key-at-least-32-bytes!!', env: { VENDOR_TOKEN: 'Bearer vendor-secret' }, log: () => {}, configPath: cfgPath,
+    })
+    const npm = makeServiceId(vendor, 'npm-tags')
+    chain.origin = originHash('https://registry.npmjs.org') // FakeChain reports this origin for every id
+    await gw.addService({ serviceId: npm, upstream: 'https://registry.npmjs.org', examplePath: '/-/package/mppx/dist-tags', tool: { name: 'npm_latest_version', path: '/-/package/{package}/dist-tags' } })
+    expect(((await (await gw.app.request(`${BASE}/services`)).json()) as { serviceId: string }[]).map((s) => s.serviceId)).toContain(npm)
+    expect((await (await mcpClient(false)).listTools()).tools.map((t) => t.name)).toContain('npm_latest_version')
+    const persisted = JSON.parse(readFileSync(cfgPath, 'utf8')) as { services: { serviceId: string }[] }
+    expect(persisted.services.map((s) => s.serviceId)).toEqual([sid, npm])
+    // the chain checks still apply: a wrong origin is refused
+    await expect(gw.addService({ serviceId: npm, upstream: 'https://evil.example.com' })).rejects.toThrow('not the registered origin')
+  })
+})
+
+describe('onboarded services at startup', () => {
+  it('a persisted onboarded service that no longer checks out is skipped, a configured one is fatal', async () => {
+    const gone = makeServiceId(vendor, 'gone')
+    chain.origin = originHash('https://other.example.com') // the chain no longer matches either upstream
+    store = new CallStore(mkdtempSync(path.join(tmpdir(), 'fermata-gw-')))
+    const base = { chain, publicClient: chain.publicClient(), attestor, store, secretKey: 'unit-test-secret-key-at-least-32-bytes!!', log: () => {} }
+    const g = await createGateway({ ...base, config: { ...config(), services: [{ ...config().services[0]!, upstream: 'https://other.example.com' }, { serviceId: gone, upstream: 'https://gone.example.com', onboarded: true }], storageDir: store.dir } })
+    expect([...g.services.keys()]).toEqual([sid.toLowerCase()])
+    await expect(createGateway({ ...base, config: { ...config(), services: [{ serviceId: gone, upstream: 'https://gone.example.com' }], storageDir: store.dir } })).rejects.toThrow('not the registered origin')
   })
 })
 

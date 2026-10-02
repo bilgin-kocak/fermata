@@ -107,6 +107,10 @@ the release settle tx (README "Case (Moderato)" table) showing the two `Transfer
 > from the chain alone: hold, then release and fee, or refund — per call, one query, no database
 > to trust.
 
+**Optional 10 s insert (live site):**
+- **Picture:** the Vendors tab (scores from on-chain events), then the List your API tab drafting a delivery rule for a real URL.
+- **Line:** *"Every verdict also builds a public record of who delivers, and any API can list itself in a minute."*
+
 ### 2:25–2:40 · Roadmap and ask (15 s · VO 29 words ≈ 12 s)
 
 **Picture:** roadmap list from the README, then the logo, the GitHub URL and *Pay on proof.*
