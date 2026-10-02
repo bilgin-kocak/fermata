@@ -5,7 +5,7 @@
 // only used by the unprotected `tempo` fallback, which calls the vendor directly.
 import { readFileSync } from 'node:fs'
 import { serve } from '@hono/node-server'
-import { Agent, fetch as undiciFetch } from 'undici'
+import { fetch as undiciFetch } from 'undici'
 import { createPublicClient, createWalletClient, http, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { tempoChain } from '@fermata/sdk'
@@ -14,6 +14,7 @@ import { HttpAttestor } from './attestor.ts'
 import { ViemChain } from './chain.ts'
 import { loadConfig } from './config.ts'
 import { CallStore } from './store.ts'
+import { parseResolve, upstreamDispatcher } from './upstream.ts'
 
 function required(name: string): string {
   const v = process.env[name]
@@ -27,24 +28,10 @@ const publicClient = createPublicClient({ chain: chainDef, transport: http(confi
 const relayer = createWalletClient({ account: privateKeyToAccount(required('RELAYER_PRIVATE_KEY') as Hex), chain: chainDef, transport: http(config.rpc) })
 const chainId = await publicClient.getChainId()
 
-const resolve = new Map(
-  (process.env.GATEWAY_RESOLVE ?? '')
-    .split(',')
-    .filter(Boolean)
-    .map((r) => r.split('=') as [string, string]),
+const dispatcher = upstreamDispatcher(
+  parseResolve(process.env.GATEWAY_RESOLVE),
+  process.env.GATEWAY_UPSTREAM_CA ? readFileSync(process.env.GATEWAY_UPSTREAM_CA) : undefined,
 )
-const dispatcher = new Agent({
-  connect: {
-    ca: process.env.GATEWAY_UPSTREAM_CA ? readFileSync(process.env.GATEWAY_UPSTREAM_CA) : undefined,
-    lookup: (hostname, options, cb) => {
-      const target = [...resolve.entries()].find(([k]) => k.split(':')[0] === hostname)?.[1]?.split(':')[0]
-      // Node ≥ 22.21 asks for { all: true } (Happy Eyeballs) and then expects an address list.
-      if (target && (options as { all?: boolean }).all) return (cb as (e: null, a: { address: string; family: number }[]) => void)(null, [{ address: target, family: 4 }])
-      if (target) return (cb as (e: null, a: string, f: number) => void)(null, target, 4)
-      return import('node:dns').then((dns) => dns.lookup(hostname, options, cb as never))
-    },
-  },
-})
 
 const gateway = await createGateway({
   config,
