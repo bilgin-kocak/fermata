@@ -86,7 +86,7 @@ export async function createBridge(cfg: BridgeConfig) {
   const server = new Server({ name: 'fermata', version: '0.1.0' }, {
     capabilities: { tools: {} },
     instructions:
-      'Tools marked as paid cost a small testnet stablecoin amount per call, paid with Fermata: the money is held in escrow on Tempo and only released to the vendor if a TLSNotary proof shows the vendor really delivered; a proven failure or no answer is refunded to you automatically. Before paying, fermata_vendor_scores shows each vendor's proven delivery record (from on-chain events) so you can pick a reliable one. Each paid result names its callId; fermata_verify re-checks the proof offline, fermata_reconcile shows the on-chain movements.',
+      'Tools marked as paid cost a small testnet stablecoin amount per call, paid with Fermata: the money is held in escrow on Tempo and only released to the vendor if a TLSNotary proof shows the vendor really delivered; a proven failure or no answer is refunded to you automatically. Before paying, fermata_vendor_scores shows every vendor\u2019s proven delivery record (from on-chain events) so you can pick a reliable one. Each paid result names its callId; fermata_verify re-checks the proof offline, fermata_reconcile shows the on-chain movements.',
   })
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
