@@ -284,6 +284,12 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
 - [ ] Coinbase: `bash scripts/probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`, then
   `REAL_VENDORS=npm,coinbase bash scripts/demo-stack.sh up --chain moderato && pnpm demo:real --chain moderato`
   (Bilgin; this environment can't reach Coinbase).
+- [x] **Pitch deck (2026-10-02):** 10 slides in a Claude Slides artifact, linked from SUBMISSION.
+  - It leads with the Moderato numbers.
+  - The economics slide uses the measured 66 MB per proof at an assumed $0.09/GB, the 5 % sampled-proving cost, and the 1 − (1 − p·f)^n detection probability.
+  - The speaker notes are the pitch-video script.
+- [ ] Pitch video, recorded by Bilgin from the deck's speaker notes. The rules (secondary source)
+  ask for a pitch video separate from the demo video.
 
 ## Reused from WebProof (bilgin-kocak/webproof-solana @ 609a654, Apache-2.0)
 

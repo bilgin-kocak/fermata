@@ -20,6 +20,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | 3-minute demo | ⏳ | same video; the live part follows DEMO.md's "live single call" script |
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
+| Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides; downloads as PPTX/PDF). **It is private until Bilgin shares it** from the page's Share menu. Its speaker notes are the script for the separate 2–3 minute pitch video. |
 
 ## Description
 
