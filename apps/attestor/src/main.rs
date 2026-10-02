@@ -9,13 +9,14 @@ use tokio::net::TcpListener;
 
 use fermata_attest::{
     chain::RpcChain,
-    config::{PredicateStore, load_roots},
+    config::{PredicateStore, trust_roots},
     eip712::{self, Domain},
     hashes::{Origin, hex0x, notary_key_hash, parse_hex20, parse_hex32, predicate_hash},
     notary,
     predicate::Predicate,
     prove::{self, ProveRequest},
     serve::{self, State, split_url},
+    tunnel::Proxy,
     verify,
 };
 
@@ -36,9 +37,12 @@ enum Cmd {
     Notary {
         #[arg(long, default_value = "127.0.0.1:7047")]
         listen: String,
-        /// PEM with the CA(s) of the vendors it may notarize.
+        /// PEM with the CA(s) of the vendors it may notarize (repeatable).
         #[arg(long)]
-        ca: PathBuf,
+        ca: Vec<PathBuf>,
+        /// `mozilla`: also trust Mozilla's root program (real vendors such as registry.npmjs.org).
+        #[arg(long, value_parser = ["mozilla"])]
+        roots: Option<String>,
         /// 32-byte hex signing key.
         #[arg(long, env = "NOTARY_PRIVATE_KEY", hide_env_values = true)]
         key: String,
@@ -69,9 +73,12 @@ enum Cmd {
     Verify {
         #[arg(long)]
         presentation: PathBuf,
-        /// PEM with the vendor CA(s) that the server certificate must chain to.
+        /// PEM with the vendor CA(s) that the server certificate must chain to (repeatable).
         #[arg(long)]
-        ca: PathBuf,
+        ca: Vec<PathBuf>,
+        /// `mozilla`: also trust Mozilla's root program (real vendors such as registry.npmjs.org).
+        #[arg(long, value_parser = ["mozilla"])]
+        roots: Option<String>,
         #[arg(long)]
         call_id: String,
         /// Predicate file(s) or directories (content-addressed by sha256).
@@ -135,9 +142,16 @@ enum Cmd {
 struct Net {
     #[arg(long, default_value = "127.0.0.1:7047")]
     notary: String,
-    /// PEM with the vendor CA(s).
+    /// PEM with the vendor CA(s) (repeatable).
     #[arg(long)]
-    ca: PathBuf,
+    ca: Vec<PathBuf>,
+    /// `mozilla`: also trust Mozilla's root program (real vendors such as registry.npmjs.org).
+    #[arg(long, value_parser = ["mozilla"])]
+    roots: Option<String>,
+    /// Reach vendors through this HTTP CONNECT proxy, e.g. http://127.0.0.1:3128. Hosts pinned
+    /// with --resolve are always dialled directly; the notary never goes through the proxy.
+    #[arg(long, env = "FERMATA_UPSTREAM_PROXY")]
+    upstream_proxy: Option<String>,
     /// `host:port=ip:port`, like curl --resolve (repeatable).
     #[arg(long)]
     resolve: Vec<String>,
@@ -185,6 +199,7 @@ async fn main() -> Result<()> {
         Cmd::Notary {
             listen,
             ca,
+            roots,
             key,
             timeout_secs,
         } => {
@@ -197,7 +212,7 @@ async fn main() -> Result<()> {
             let listener = TcpListener::bind(&listen).await?;
             notary::run(
                 listener,
-                load_roots(&ca)?,
+                trust_roots(&ca, roots.is_some())?,
                 key,
                 Duration::from_secs(timeout_secs),
             )
@@ -226,11 +241,18 @@ async fn main() -> Result<()> {
                         .context("header must be `name: value`")
                 })
                 .collect::<Result<Vec<_>>>()?;
+            // A host pinned with --resolve is dialled directly; anything else may use the proxy.
+            let pinned = net.resolve_map()?.remove(&authority);
+            let proxy = match (&pinned, &net.upstream_proxy) {
+                (None, Some(url)) => Some(Proxy::parse(url)?),
+                _ => None,
+            };
             let request = ProveRequest {
                 notary: net.notary.clone(),
-                connect: net.resolve_map()?.remove(&authority).unwrap_or(authority),
+                connect: pinned.unwrap_or(authority),
                 origin,
-                roots: load_roots(&net.ca)?,
+                roots: trust_roots(&net.ca, net.roots.is_some())?,
+                proxy,
                 method,
                 target,
                 headers,
@@ -257,6 +279,7 @@ async fn main() -> Result<()> {
         Cmd::Verify {
             presentation,
             ca,
+            roots: mozilla,
             call_id,
             predicates,
             offline,
@@ -270,7 +293,7 @@ async fn main() -> Result<()> {
             out,
         } => {
             let bytes = std::fs::read(&presentation)?;
-            let roots = load_roots(&ca)?;
+            let roots = trust_roots(&ca, mozilla.is_some())?;
             let call_id = parse_hex32(&call_id)?;
             let store = PredicateStore::load(&predicates)?;
             let result = if offline {
@@ -332,8 +355,10 @@ async fn main() -> Result<()> {
             ensure!(!predicates.is_empty(), "no predicates loaded");
             let state = State {
                 chain,
-                roots: load_roots(&net.ca)?,
-                ca_path: net.ca.clone(),
+                roots: trust_roots(&net.ca, net.roots.is_some())?,
+                ca_paths: net.ca.clone(),
+                mozilla_roots: net.roots.is_some(),
+                upstream_proxy: net.upstream_proxy.clone(),
                 notary: net.notary.clone(),
                 predicates,
                 key: parse_hex32(&signer)?,

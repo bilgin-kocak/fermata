@@ -93,6 +93,9 @@ delivered.*
 > key and no trust in us. Every recomputed hash matches the one on-chain. And this one — a real
 > 500, proven, refunded.
 
+**Optional 10 s insert (from `pnpm demo:real`):** a terminal shot of npm's real 404 being refunded.
+Line: *"And it isn't our mock. Here Fermata proves the real npm registry: a real 404, refunded."*
+
 ### 2:05–2:25 · Reconciliation by memo (20 s · VO 37 words ≈ 15 s)
 
 **Picture:** `reconciliation.webm`: rows with hold → release + fee, or hold → refund, each ✓;

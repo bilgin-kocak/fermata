@@ -15,7 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 # TLSNotary v0.1.0-alpha.15 (git only; not on crates.io). Same pin as the spike and WebProof.
-tlsn = { git = "https://github.com/tlsnotary/tlsn", rev = "47aee45b53e06648c1b2ad3689b367b8c923fdec" }
+# `mozilla-certs`: Mozilla roots for real vendors (webpki-root-certs is already a tlsn-core dependency).
+tlsn = { git = "https://github.com/tlsnotary/tlsn", rev = "47aee45b53e06648c1b2ad3689b367b8c923fdec", features = ["mozilla-certs"] }
 
 anyhow = "1"
 base64 = "0.22"

@@ -20,6 +20,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | 3-minute demo | ⏳ | same video; the live part follows DEMO.md's "live single call" script |
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
+| Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides; downloads as PPTX/PDF). **It is private until Bilgin shares it** from the page's Share menu. Its speaker notes are the script for the separate 2–3 minute pitch video. |
 
 ## Description
 
@@ -64,6 +65,10 @@ verifiers, an N-of-M quorum and on-chain proof verification are on the roadmap.
 - **MPP.** A custom `fermata` payment method for `mppx` (client + server): the 402 challenge
   carries the escrow, serviceId, callId, requestHash, amount and deadline; the credential is the
   hold transaction. It is offered next to Tempo's built-in `tempo` method in every challenge.
+- **Real vendors.** Besides the mock vendor, Fermata proves the public npm registry. The vendor's
+  certificate chains to Mozilla's roots and the call goes over the open internet. A real 200 was
+  released and npm's real 404 refunded, about 2 s per proof (`pnpm demo:real`, FACTS §15.6).
+  Coinbase spot price is wired up for a local run.
 - **MPP over MCP.** The gateway's `/mcp` endpoint exposes every service as a paid MCP tool, using
   mppx's MCP transport with the `fermata` method. `fermata-mcp` lets Claude Code or Claude Desktop
   pay those tools from a testnet wallet, with the agent's own allow-lists and a spending cap. In a

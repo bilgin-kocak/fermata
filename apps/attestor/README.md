@@ -25,7 +25,21 @@ VERIFIER_PRIVATE_KEY=0x… $B verify --presentation call.tlsn --ca ../vendor/cer
 
 # HTTP API for the gateway: POST /v1/attest | /v1/prove | /v1/verify, GET /v1/presentations/<callId>
 VERIFIER_PRIVATE_KEY=0x… $B serve --rpc … --escrow … --ca … --predicate predicates --resolve …
+
+# a real vendor: trust Mozilla's roots (notary, prove, verify, serve all take --roots mozilla);
+# behind an egress proxy, tunnel the vendor socket with HTTP CONNECT (never the notary's)
+NOTARY_PRIVATE_KEY=0x… $B notary --listen 127.0.0.1:7047 --roots mozilla
+FERMATA_UPSTREAM_PROXY=http://127.0.0.1:3128 $B prove --roots mozilla \
+  --url https://registry.npmjs.org/-/package/mppx/dist-tags --call-id 0x… --out npm.tlsn
+$B verify --offline --presentation npm.tlsn --roots mozilla --predicate predicates/npm-dist-tags-v1.json --call-id 0x… --service-id 0x…
+bash ../../scripts/probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot   # does a host fit TLSNotary's TLS profile?
 ```
+
+`--ca` (repeatable) and `--roots mozilla` add up. A proof of a real vendor never verifies against a
+dev CA alone, and the reverse holds too. The proxy only relays ciphertext: MPC-TLS runs end to end
+with the vendor, and the certificate is checked by the prover, the notary and every verifier. A
+proxy that intercepts TLS therefore fails with `UnknownIssuer` and produces no transcript. Hosts
+pinned with `--resolve` are always dialled directly.
 
 Before signing, `verify` fails closed unless: the notary key hashes to the service's
 `notaryKeyHash`; the TLS server name and `Host` header give the registered `originHash`; only auth

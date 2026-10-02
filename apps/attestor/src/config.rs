@@ -26,6 +26,23 @@ pub fn load_roots(path: &Path) -> Result<Vec<CertificateDer>> {
     Ok(out)
 }
 
+/// The trust roots for vendor certificates: the PEM files in `ca` (dev CAs), plus Mozilla's root
+/// program when `mozilla` is set (real vendors). At least one source is required.
+pub fn trust_roots(ca: &[std::path::PathBuf], mozilla: bool) -> Result<Vec<CertificateDer>> {
+    let mut roots = Vec::new();
+    for path in ca {
+        roots.extend(load_roots(path)?);
+    }
+    if mozilla {
+        roots.extend(tlsn::webpki::RootCertStore::mozilla().roots);
+    }
+    anyhow::ensure!(
+        !roots.is_empty(),
+        "no trust roots: pass --ca <pem> and/or --roots mozilla"
+    );
+    Ok(roots)
+}
+
 /// A 32-byte hex key from an environment variable.
 pub fn key_from_env(var: &str) -> Result<[u8; 32]> {
     parse_hex32(&std::env::var(var).with_context(|| format!("{var} is not set"))?)
