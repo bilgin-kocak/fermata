@@ -91,13 +91,19 @@ PORT=$QUOTE_PORT CHAOS_RATE=0.03 bg vendor-quote node apps/vendor/server.mjs
 PORT=$OK_PORT bg vendor-ok node apps/vendor/server.mjs
 PORT=$E500_PORT CHAOS=500 bg vendor-500 node apps/vendor/server.mjs
 PORT=$HANG_PORT CHAOS=hang bg vendor-hang node apps/vendor/server.mjs
-NOTARY_PRIVATE_KEY=$NOTARY_KEY RUST_LOG=error bg notary "$BIN" notary --listen 127.0.0.1:$NOTARY_PORT --ca "$CA"
+# Real vendors (REAL_VENDORS=npm,coinbase; default npm; "" for none) are checked against Mozilla's roots.
+REAL_VENDORS=${REAL_VENDORS-npm}
+NOTARY_PRIVATE_KEY=$NOTARY_KEY RUST_LOG=error bg notary "$BIN" notary --listen 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla
 for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT $NOTARY_PORT; do wait_port "$p"; done
 NOTARY_PUBLIC_KEY=$(grep -o '"notaryKey":"0x[0-9a-f]*"' "$DIR/notary.log" | cut -d'"' -f4)
 RESOLVE=()
 for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT; do RESOLVE+=(--resolve "vendor.fermata.test:$p=127.0.0.1:$p"); done
-VERIFIER_PRIVATE_KEY=$VERIFIER_KEY bg attestor "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
-  --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --predicate apps/attestor/predicates --storage "$DIR/presentations" \
+# Behind an egress proxy (like this build environment), real vendors are reached through a CONNECT
+# tunnel; local demo vendors (pinned with --resolve) never are.
+PROXY_ENV=(); UPSTREAM_PROXY=${FERMATA_UPSTREAM_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}
+[ -n "$UPSTREAM_PROXY" ] && PROXY_ENV=(FERMATA_UPSTREAM_PROXY="$UPSTREAM_PROXY")
+bg attestor env "${PROXY_ENV[@]}" VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
+  --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla --predicate apps/attestor/predicates --storage "$DIR/presentations" \
   --attempt-timeout-secs 10 "${RESOLVE[@]}"
 wait_port $ATTESTOR_PORT
 VERIFIER_ADDRESS=$(curl -s --noproxy '*' http://127.0.0.1:$ATTESTOR_PORT/healthz | jq -r .signer)
@@ -114,6 +120,20 @@ SERVICE_QUOTE=$(register quote $QUOTE_PORT 120 "Crypto price quote, e.g. symbol 
 SERVICE_OK=$(register quote-ok $OK_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (reliable vendor)." get_quote_reliable)
 SERVICE_500=$(register quote-500 $E500_PORT 120 "Crypto price quote from a broken vendor (always HTTP 500) — for demonstrating refunds." get_quote_broken)
 SERVICE_HANG=$(register quote-hang $HANG_PORT 30 "Crypto price quote from a vendor that never answers — for demonstrating timeout refunds." get_quote_silent)
+register_real() { # label upstream predicate summary tool-name tool-path example-path
+  $TSX scripts/register-service.ts --chain "$CHAIN" --rpc "$RPC" --escrow "$ESCROW" --label "$1" --upstream "$2" \
+    --predicate "apps/attestor/predicates/$3" --notary-public-key "$NOTARY_PUBLIC_KEY" --verifier "$VERIFIER_ADDRESS" \
+    --window 120 --config "$CONFIG" --summary "$4" --tool-name "$5" --tool-path "$6" --example-path "$7" 2>> "$DIR/register.log"
+}
+SERVICE_NPM=""; SERVICE_COINBASE=""
+case ",$REAL_VENDORS," in *,npm,*)
+  SERVICE_NPM=$(register_real npm-tags https://registry.npmjs.org npm-dist-tags-v1.json \
+    "Latest published versions (dist-tags) of an npm package, from the real public npm registry." \
+    npm_latest_version '/-/package/{package}/dist-tags' /-/package/mppx/dist-tags) ;; esac
+case ",$REAL_VENDORS," in *,coinbase,*)
+  SERVICE_COINBASE=$(register_real cb-spot https://api.coinbase.com coinbase-spot-v1.json \
+    "Coinbase spot price for a pair such as BTC-USD, from the real public Coinbase API." \
+    get_spot_price '/v2/prices/{pair}/spot' /v2/prices/BTC-USD/spot) ;; esac
 
 echo "== gateway"
 GATEWAY_CONFIG=$CONFIG GATEWAY_PORT=$GATEWAY_PORT GATEWAY_STORAGE=$DIR/calls GATEWAY_SWEEP_MS=2000 GATEWAY_REALM=127.0.0.1 \
@@ -126,6 +146,8 @@ wait_port "$GATEWAY_PORT" || { cat "$DIR/gateway.log"; exit 1; }
 jq -n --arg chain "$CHAIN" --arg rpc "$RPC" --arg escrow "$ESCROW" --arg gateway "http://127.0.0.1:$GATEWAY_PORT" \
   --arg verifier "$VERIFIER_ADDRESS" --arg explorer "$EXPLORER" --arg attestor "http://127.0.0.1:$ATTESTOR_PORT" \
   --arg quote "$SERVICE_QUOTE" --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" \
+  --arg npm "$SERVICE_NPM" --arg coinbase "$SERVICE_COINBASE" \
   '{chain:$chain, rpc:$rpc, escrow:$escrow, gateway:$gateway, attestor:$attestor, verifier:$verifier, explorer:(if $explorer=="" then null else $explorer end),
-    services:{quote:$quote, ok:$ok, "e500":$e500, hang:$hang}}' > "$DIR/stack.json"
+    services:{quote:$quote, ok:$ok, "e500":$e500, hang:$hang},
+    real:({} + (if $npm=="" then {} else {npm:$npm} end) + (if $coinbase=="" then {} else {coinbase:$coinbase} end))}' > "$DIR/stack.json"
 echo "demo stack up on $CHAIN: gateway http://127.0.0.1:$GATEWAY_PORT (dashboard /dashboard) — $DIR/stack.json; stop with: bash scripts/demo-stack.sh down"
