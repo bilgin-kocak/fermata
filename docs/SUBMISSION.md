@@ -39,7 +39,8 @@ reconciles from on-chain logs alone.
 
 Agents add one line to their `mppx` client (`fermata({ account })`); vendors register a service
 and keep their API unchanged. The gateway also offers plain `tempo` payments, tagged
-`unprotected`, so existing MPP clients keep working.
+`unprotected`, so existing MPP clients keep working. MCP agents such as Claude get the same
+protection as tools: one `claude mcp add` gives Claude pay-on-proof APIs.
 
 Trust model (v1), stated plainly: the escrow trusts one verifier key per service, held by
 Fermata; the notary is a separate, blind process that we run in the demo. A vendor trusts
@@ -63,6 +64,11 @@ verifiers, an N-of-M quorum and on-chain proof verification are on the roadmap.
 - **MPP.** A custom `fermata` payment method for `mppx` (client + server): the 402 challenge
   carries the escrow, serviceId, callId, requestHash, amount and deadline; the credential is the
   hold transaction. It is offered next to Tempo's built-in `tempo` method in every challenge.
+- **MPP over MCP.** The gateway's `/mcp` endpoint exposes every service as a paid MCP tool, using
+  mppx's MCP transport with the `fermata` method. `fermata-mcp` lets Claude Code or Claude Desktop
+  pay those tools from a testnet wallet, with the agent's own allow-lists and a spending cap. In a
+  real headless Claude Code session, Claude bought two quotes: one released, and a proven HTTP 500
+  refunded. It then re-verified the proof (`apps/mcp/README.md`).
 - **Stablecoin gas.** Agents pay gas in the same TIP-20 stablecoin (pathUSD on testnet); the demo's
   totals report escrow fee and gas separately.
 - **Network:** Tempo Moderato testnet, chain ID 42431, explorer `explore.testnet.tempo.xyz`.

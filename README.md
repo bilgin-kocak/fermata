@@ -74,8 +74,9 @@ sequenceDiagram
 |---|---|
 | [`contracts/src/FermataEscrow.sol`](contracts/src/FermataEscrow.sol) | `hold → settle(verdict) \| claimTimeout`. Per-call holds pulled with a TIP-20 permit; `…WithMemo` transfers with memo = callId; EIP-712 verdicts from one registered verifier per service; service pins the origin, the notary key hash and the predicate hash; 0.5 % fee on release. |
 | [`apps/attestor`](apps/attestor) | `fermata-attest` (Rust, TLSNotary `v0.1.0-alpha.15`): `notary` (the blind MPC-TLS co-signer), `prove`, `verify` (binding checks + predicate + EIP-712 signing), `verify --offline` (anyone, no key), `serve` (HTTP API for the gateway). |
-| [`apps/gateway`](apps/gateway) | The MPP server agents pay. Offers `fermata` (escrowed, pay on proof) and plain `tempo` (direct, tagged `unprotected`) in every challenge; settles, then responds; a sweeper claims expired holds. Serves `/proofs/:callId`, `/calls`, `/events`, `/reconcile/:callId`, `/openapi.json`, `/llms.txt` and the dashboard. |
+| [`apps/gateway`](apps/gateway) | The MPP server agents pay. Offers `fermata` (escrowed, pay on proof) and plain `tempo` (direct, tagged `unprotected`) in every challenge; settles, then responds; a sweeper claims expired holds. Serves `/proofs/:callId`, `/calls`, `/events`, `/reconcile/:callId`, `/openapi.json`, `/llms.txt`, the dashboard, and **`/mcp`**: every service as a paid MCP tool. |
 | [`packages/sdk`](packages/sdk) | `fermata({ account })` for `mppx/client`, `fermataServer()` for `mppx/server`, escrow bindings, `reconcile` (movements by memo), `reclaim`. |
+| [`apps/mcp`](apps/mcp) | `fermata-mcp`: the stdio MCP server an agent such as Claude launches. It pays the gateway's MCP tools from the agent's testnet wallet, with your own allow-lists and a spending cap. |
 | [`apps/dashboard`](apps/dashboard) | Live Held/Released/Refunded feed, per-call proof drawer with offline re-verify, reconciliation by memo. Light/dark, works on a phone. |
 | [`apps/vendor`](apps/vendor) | Demo quote API (TLS 1.2) with failure modes: 500, truncated JSON, cut connection, hang, random `CHAOS_RATE`. |
 
@@ -86,6 +87,25 @@ import { Mppx } from 'mppx/client'
 import { fermata } from '@fermata/sdk'
 const mppx = Mppx.create({ methods: [fermata({ account })] })
 const res = await mppx.fetch('https://gateway.example/s/<serviceId>/v1/quote?symbol=BTC-USD')
+```
+
+### MCP: Claude pays on proof
+
+MCP agents get the same protection as tools. The gateway's `/mcp` endpoint exposes every service as a
+paid tool, using MPP over MCP (mppx's MCP transport, credential in `_meta`). `fermata-mcp` is the
+local server that Claude Code or Claude Desktop launches; it pays those tools from the agent's
+testnet wallet. In a real headless Claude Code session on Anvil, given only this server:
+
+1. Claude bought two quotes in parallel.
+2. The reliable vendor's quote was **released**.
+3. The broken vendor's proven HTTP 500 was **refunded**.
+4. Claude re-verified the first proof against the chain and explained each outcome correctly.
+
+Transcript and setup: [`apps/mcp/README.md`](apps/mcp/README.md). `pnpm demo:mcp` runs the same flow
+as a script (6/6 PASS on Anvil).
+
+```sh
+claude mcp add fermata -e FERMATA_AGENT_KEY=0x… -e FERMATA_TRUSTED_VERIFIERS=0x… … -- tsx apps/mcp/src/index.ts
 ```
 
 ## What the proof does and does not establish
@@ -125,6 +145,7 @@ each recomputed hash next to the one on chain.
 bash scripts/demo-stack.sh up --chain anvil    # vendors, notary, attestor, gateway + dashboard
 pnpm demo:cases --chain anvil                  # the three canonical cases, pass/fail table
 pnpm demo:load --calls 100 --chain anvil       # ≈97/3, timings, MPC bandwidth, gas
+pnpm demo:mcp --chain anvil                    # an MCP agent pays on proof: released, refunded, verified
 open http://127.0.0.1:4300/dashboard           # live feed, proof drawer, reconciliation by memo
 bash scripts/demo-stack.sh down
 ```
@@ -171,6 +192,43 @@ escrow** (hold once for N calls, settle in batches), **sampled proving** (prove 
 unpredictable subset; the vendor cannot tell which calls are checked) and **prove-on-dispute**
 (proofs only when the agent flags a call, with the hold covering the dispute window).
 
+## How Fermata compares
+
+Agent payments today mostly prove that the buyer paid. Here is how the nearest designs handle "the
+API didn't deliver":
+
+| | Who decides delivery | Evidence | Refund path | Chain |
+|---|---|---|---|---|
+| x402 / MPP receipt | nobody | a payment receipt only | none | any |
+| [Bursar](https://github.com/theweb3wizard/Bursar) (same track) | not in scope: invoicing, budgets and receivables; its contract "never holds funds" | on-chain payment ↔ invoice | none | Tempo |
+| [Recourse](https://github.com/successaje/recourse) | Chainlink CRE enclave, after the buyer disputes with a bond | a seller-published SLA plus the seller's signature over what it sent | escrow pays the dispute winner | Hedera (via CCIP) |
+| [ERC-8183](https://github.com/ethereum/ERCs/blob/master/ERCS/erc-8183.md) Agentic Commerce (draft) | one evaluator per job (the client, a third party, or a contract) | out of scope (an optional reason hash) | evaluator rejects, or anyone refunds after expiry | any EVM |
+| **Fermata** | one registered verifier per service (v1: Fermata's), checking a predicate fixed on-chain | **TLSNotary presentation of the vendor's own TLS session**; anyone re-verifies it offline | automatic: verified failure → refund; no proof by the deadline → `claimTimeout` | Tempo (TIP-20 memos), MPP-native, MCP |
+
+What is different here:
+
+- **No cooperation from the vendor.** The evidence comes from the vendor's TLS session through a
+  blind notary. The vendor doesn't sign anything, so it can't decline to.
+- **No dispute step.** The agent doesn't have to notice a failure and post a bond. Every call is
+  proved and settled within seconds (about 1 s of proving on Moderato, FACTS §15.5).
+
+What is the same:
+
+- **One trusted decider.** Like ERC-8183's single evaluator, a dishonest verifier is *detectable*
+  here, not *prevented*. The trust model above says exactly that, and the roadmap targets it.
+
+Fermata maps onto ERC-8183 one to one:
+
+| ERC-8183 | Fermata |
+|---|---|
+| fund a job | `hold` (permit + `transferFromWithMemo`) |
+| `submit` | the vendor answering over TLS |
+| evaluator `complete` / `reject` | `settle(verdict)`: DELIVERED / FAILED |
+| `claimRefund` after expiry | `claimTimeout` |
+
+An ERC-8183 adapter with the attestor as the evaluator is a natural next step. It is not built.
+Comparison checked against each project's public repository or specification on 2026-10-02.
+
 ## Roadmap
 
 - **Vendor-chosen verifiers and an N-of-M verifier quorum** — move adjudication off the Fermata operator.
@@ -192,6 +250,7 @@ git submodule update --init && pnpm install
 bash scripts/demo-stack.sh up --chain anvil     # first run builds the attestor (several minutes)
 pnpm demo:cases --chain anvil
 pnpm demo:load --calls 100 --chain anvil
+pnpm demo:mcp --chain anvil                     # MCP agent: released / refunded / verified (see apps/mcp)
 open http://127.0.0.1:4300/dashboard
 bash scripts/demo-stack.sh down
 
