@@ -9,6 +9,7 @@ import { fermataEscrowAbi, fermataServer, MODERATO, originHash, requestHash } fr
 import type { Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
+import { mcpHandler } from './mcp.ts'
 import { FINAL, type CallRecord, type CallStore } from './store.ts'
 
 export type GatewayDeps = {
@@ -121,6 +122,57 @@ export async function createGateway(deps: GatewayDeps) {
     return store.update(record.callId, { status: 'settle-pending', error: `settle: ${result.error}` })
   }
 
+  /**
+   * After a valid `fermata` credential: record the hold, prove the vendor's answer, settle the verdict.
+   * Shared by the HTTP route and the MCP endpoint. Returns the proved vendor response (or the
+   * no-verdict error) and the call record.
+   */
+  async function fulfil(
+    svc: Service,
+    req: { method: string; target: string; headers: Headers; body: Uint8Array },
+    credential: { challenge: { request: unknown }; payload: unknown },
+  ): Promise<{ response: Response; record: CallRecord }> {
+    const callId = (credential.challenge.request as { callId: Hex }).callId
+    const holdTx = (credential.payload as { txHash: Hex }).txHash
+    const rh = requestHash(svc.serviceId, req.method, req.target, req.body)
+    const hold = await chain.hold(callId)
+    const now = new Date().toISOString()
+    let record = await store.put({
+      callId, serviceId: svc.serviceId, method: req.method, target: req.target, requestHash: rh, holdTx, agent: hold.agent,
+      deadline: hold.deadline.toString(), status: 'held', createdAt: now, updatedAt: now,
+    })
+
+    const result = await attestor.attest({
+      callId, url: `${svc.upstream}${req.target}`, method: req.method, headers: upstreamHeaders(svc, req.headers), body: Buffer.from(req.body).toString('utf8'),
+    })
+
+    if (result.kind !== 'verdict') {
+      // No transcript (vendor silent, TLS failure, notary/prover down) or a failed binding check:
+      // never a verdict. Only claimTimeout can end the hold; the sweeper sends it after the window.
+      const detail = result.kind === 'rejected' ? `${result.check}: ${result.detail}` : result.detail
+      console.error(`[gateway] call ${callId} has NO VERDICT (${result.kind}: ${detail}); awaiting timeout at ${hold.deadline}`)
+      record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}` })
+      const response = Response.json(
+        { error: result.kind, detail, callId, status: 'awaiting-timeout', refundAfter: hold.deadline.toString(), reclaim: 'claimTimeout(callId) on the escrow after refundAfter' },
+        { status: result.kind === 'rejected' ? 502 : 504 },
+      )
+      return { response, record }
+    }
+
+    record = await store.update(callId, {
+      outcome: result.signed.outcome,
+      failures: result.signed.failures,
+      verdict: result.signed.verdict,
+      signature: result.signed.signatureBytes,
+      presentationHash: result.presentationHash,
+      proveMs: result.proveMs,
+      notaryBytes: result.notaryBytes,
+      signer: result.signed.signer,
+    })
+    record = await settleVerdict(record)
+    return { response: provedToResponse(result.response), record }
+  }
+
   const app = new Hono()
 
   const paid = async (c: import('hono').Context) => {
@@ -150,46 +202,8 @@ export async function createGateway(deps: GatewayDeps) {
       return res
     }
 
-    const callId = (credential.challenge.request as { callId: Hex }).callId
-    const holdTx = (credential.payload as { txHash: Hex }).txHash
-    const hold = await chain.hold(callId)
-    const now = new Date().toISOString()
-    let record = await store.put({
-      callId, serviceId: svc.serviceId, method, target, requestHash: rh, holdTx, agent: hold.agent,
-      deadline: hold.deadline.toString(), status: 'held', createdAt: now, updatedAt: now,
-    })
-
-    const result = await attestor.attest({
-      callId, url: `${svc.upstream}${target}`, method, headers: upstreamHeaders(svc, c.req.raw.headers), body: Buffer.from(body).toString('utf8'),
-    })
-
-    if (result.kind !== 'verdict') {
-      // No transcript (vendor silent, TLS failure, notary/prover down) or a failed binding check:
-      // never a verdict. Only claimTimeout can end the hold; the sweeper sends it after the window.
-      const detail = result.kind === 'rejected' ? `${result.check}: ${result.detail}` : result.detail
-      console.error(`[gateway] call ${callId} has NO VERDICT (${result.kind}: ${detail}); awaiting timeout at ${hold.deadline}`)
-      record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}` })
-      const res = r.withReceipt(
-        Response.json(
-          { error: result.kind, detail, callId, status: 'awaiting-timeout', refundAfter: hold.deadline.toString(), reclaim: 'claimTimeout(callId) on the escrow after refundAfter' },
-          { status: result.kind === 'rejected' ? 502 : 504 },
-        ),
-      )
-      return withFermataReceipt(res, record)
-    }
-
-    record = await store.update(callId, {
-      outcome: result.signed.outcome,
-      failures: result.signed.failures,
-      verdict: result.signed.verdict,
-      signature: result.signed.signatureBytes,
-      presentationHash: result.presentationHash,
-      proveMs: result.proveMs,
-      notaryBytes: result.notaryBytes,
-      signer: result.signed.signer,
-    })
-    record = await settleVerdict(record)
-    return withFermataReceipt(r.withReceipt(provedToResponse(result.response)), record)
+    const { response, record } = await fulfil(svc, { method, target, headers: c.req.raw.headers, body }, credential)
+    return withFermataReceipt(r.withReceipt(response), record)
   }
   app.all('/s/:serviceId', paid)
   app.all('/s/:serviceId/*', paid)
@@ -294,6 +308,13 @@ export async function createGateway(deps: GatewayDeps) {
     app.use('/dashboard/*', serveStatic({ root: deps.dashboardDir, rewriteRequestPath: (p) => p.replace(/^\/dashboard/, '') }))
   }
 
+  const mcp = mcpHandler({
+    app, services, escrow: chain.escrow, chainId: chain.chainId, secretKey: deps.secretKey, realm: deps.config.realm,
+    explorer: deps.explorer === undefined ? (deps.config.rpc.includes('moderato') ? MODERATO.explorer : null) : deps.explorer,
+    fermataHandler, fulfil: fulfil as never,
+  })
+  app.all('/mcp', (c) => mcp(c.req.raw))
+
   app.get('/llms.txt', (c) =>
     c.text(
       [
@@ -301,6 +322,7 @@ export async function createGateway(deps: GatewayDeps) {
         'Paid API proxy: pay with the `fermata` MPP method (escrowed, released only on a TLSNotary proof of delivery) or `tempo` (unprotected).',
         ...[...services.values()].map((s) => `- ${s.summary ?? 'service'}: ANY /s/${s.serviceId}${s.examplePath ?? '/'}`),
         'GET /services, GET /calls/:callId, GET /proofs/:callId (re-verify offline with `fermata-attest verify --offline`).',
+        'MCP: POST /mcp (Streamable HTTP) — every service is a paid tool (MPP `fermata` method via _meta["org.paymentauth/credential"]); free tools fermata_call, fermata_verify, fermata_reconcile.',
       ].join('\n'),
     ),
   )

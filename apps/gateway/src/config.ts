@@ -12,6 +12,8 @@ export type ServiceConfig = {
   /** Example path for discovery (`/openapi.json`). */
   examplePath?: string
   summary?: string
+  /** How the service appears as a paid tool on the gateway's MCP endpoint (default: `call_<label>` with a raw `path`). */
+  tool?: { name: string; description?: string; path: string }
   /** Unprotected fallback: plain `tempo` charge paid straight to the vendor, no proof. */
   tempo?: { amount: string; recipient: Address }
 }

@@ -104,15 +104,16 @@ VERIFIER_ADDRESS=$(curl -s --noproxy '*' http://127.0.0.1:$ATTESTOR_PORT/healthz
 
 echo "== services"
 CONFIG=$DIR/gateway.config.json
-register() { # label port window
+register() { # label port window summary mcp-tool-name
   $TSX scripts/register-service.ts --chain "$CHAIN" --rpc "$RPC" --escrow "$ESCROW" --label "$1" \
     --upstream "https://vendor.fermata.test:$2" --notary-public-key "$NOTARY_PUBLIC_KEY" --verifier "$VERIFIER_ADDRESS" \
-    --window "$3" --config "$CONFIG" --tempo-amount 0.01 --summary "$4" 2>> "$DIR/register.log"
+    --window "$3" --config "$CONFIG" --tempo-amount 0.01 --summary "$4" \
+    --tool-name "$5" --tool-path '/v1/quote?symbol={symbol}' 2>> "$DIR/register.log"
 }
-SERVICE_QUOTE=$(register quote $QUOTE_PORT 120 "BTC/ETH/SOL quote (3% vendor failures)")
-SERVICE_OK=$(register quote-ok $OK_PORT 120 "quote, always answers")
-SERVICE_500=$(register quote-500 $E500_PORT 120 "quote, always HTTP 500")
-SERVICE_HANG=$(register quote-hang $HANG_PORT 30 "quote, never answers")
+SERVICE_QUOTE=$(register quote $QUOTE_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (vendor fails ~3% of calls)." get_quote)
+SERVICE_OK=$(register quote-ok $OK_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (reliable vendor)." get_quote_reliable)
+SERVICE_500=$(register quote-500 $E500_PORT 120 "Crypto price quote from a broken vendor (always HTTP 500) — for demonstrating refunds." get_quote_broken)
+SERVICE_HANG=$(register quote-hang $HANG_PORT 30 "Crypto price quote from a vendor that never answers — for demonstrating timeout refunds." get_quote_silent)
 
 echo "== gateway"
 GATEWAY_CONFIG=$CONFIG GATEWAY_PORT=$GATEWAY_PORT GATEWAY_STORAGE=$DIR/calls GATEWAY_SWEEP_MS=2000 GATEWAY_REALM=127.0.0.1 \

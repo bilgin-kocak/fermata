@@ -258,6 +258,22 @@ Acceptance:
   (`{ all: true }` → "Invalid IP address: undefined" on the unprotected `tempo` path); now in
   `apps/gateway/src/upstream.ts` with a regression test that reproduces the error without the fix.
 
+## After M5 — additions for judging (2026-10-02)
+
+Chosen from the research list (pitch, outreach and deck stay with Bilgin):
+- [x] **MCP.** The gateway's `/mcp` endpoint (paid tools via mppx's MCP transport, plus the free
+  `fermata_call`, `fermata_verify` and `fermata_reconcile`) and `apps/mcp` (`fermata-mcp`, the
+  stdio server Claude launches; allow-lists and a spending guard).
+  - Gateway unit tests: 7 new; 22 in total.
+  - `pnpm demo:mcp`: 6/6 PASS on Anvil.
+  - A real headless Claude Code session: released, refunded and verified correctly
+    (`apps/mcp/README.md`).
+  - `demo:cases` is still 3/3 after the shared-pipeline refactor.
+- [x] **README "How Fermata compares".** Covers x402/MPP receipts, Bursar, Recourse and ERC-8183,
+  plus the ERC-8183 mapping. Checked against their repos and the ERC text; x402r and the x402
+  escrow proposal weren't reachable from here, so they are left out.
+- [ ] MCP on Moderato: same commands with a Moderato gateway (Bilgin, outside this environment).
+
 ## Reused from WebProof (bilgin-kocak/webproof-solana @ 609a654, Apache-2.0)
 
 Ported into `apps/attestor` with a header crediting WebProof: `notarize.rs` (prover + notary
