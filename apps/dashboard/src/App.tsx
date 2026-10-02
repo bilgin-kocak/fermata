@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type Call, type EscrowEvent, type Info, type Reconciliation, type Reverify, type Service } from './api.ts'
+import { api, type Call, type EscrowEvent, type Info, type Reconciliation, type Reverify, type Scores, type Service } from './api.ts'
 import { STATUS, age, bytes, serviceLabel, short, usd } from './format.ts'
 
-type Tab = 'live' | 'reconciliation' | 'services'
+type Tab = 'live' | 'vendors' | 'reconciliation' | 'services'
 
 function usePoll<T>(load: () => Promise<T>, ms: number) {
   const [data, setData] = useState<T>()
@@ -446,6 +446,74 @@ function ReconciliationTab({ calls, info }: { calls: Call[]; info?: Info }) {
   )
 }
 
+const pct = (x: number | null) => (x === null ? '—' : `${(x * 100).toFixed(x === 1 || x === 0 ? 0 : 1)} %`)
+
+/** Every vendor's proven delivery record, from on-chain escrow events only (GET /scores). */
+function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
+  if (!scores) return <div className="empty">Loading…</div>
+  const rows = scores.scores
+  return (
+    <div className="panel">
+      <h2>
+        Vendor scores <span className="muted">proven delivery, from on-chain events</span>
+      </h2>
+      {rows.length === 0 ? (
+        <div className="empty">No calls yet.</div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Vendor</th>
+              <th>Delivered</th>
+              <th>Score</th>
+              <th className="hide-sm">Proven failures</th>
+              <th className="hide-sm">Timeouts</th>
+              <th className="hide-sm">Agents</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s, i) => (
+              <tr key={s.serviceId}>
+                <td className="num muted">{i + 1}</td>
+                <td>
+                  <div>
+                    {s.tool ?? s.label ?? short(s.serviceId, 8)}
+                    {s.fewCalls ? <span className="badge" style={{ marginLeft: 8 }}>few calls</span> : null}
+                  </div>
+                  <div className="mono muted" title={s.serviceId}>
+                    {s.upstream ?? short(s.serviceId, 8)}
+                  </div>
+                </td>
+                <td className="num">
+                  {s.released}/{s.settled} <span className="muted">({pct(s.deliveryRate)})</span>
+                  {s.open ? <div className="muted">{s.open} open</div> : null}
+                </td>
+                <td className="num">
+                  <b>{pct(s.score)}</b>
+                </td>
+                <td className="hide-sm num">{s.provenFailures}</td>
+                <td className="hide-sm num">{s.timeouts}</td>
+                <td className="hide-sm num">{s.distinctAgents}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <footer className="foot" style={{ padding: '0 14px 12px' }}>
+        Score = Wilson 95 % lower bound of delivered ÷ settled, so 3/3 does not outrank 950/1000. Proven failure = refunded on the
+        vendor's own proved answer; timeout = no proof in the window. {scores.caveats.join(' ')} Recompute it from the chain:{' '}
+        <span className="mono">{scores.recompute.replace('<escrow>', scores.escrow)}</span>
+        {info?.explorer ? (
+          <>
+            {' '}· escrow <a href={`${info.explorer}/address/${scores.escrow}`}>{short(scores.escrow)}</a>
+          </>
+        ) : null}
+      </footer>
+    </div>
+  )
+}
+
 function ServicesTab({ services, info }: { services?: Service[]; info?: Info }) {
   if (!services) return <div className="empty">Loading…</div>
   return (
@@ -490,6 +558,7 @@ export function App() {
   const { data: calls = [], error } = usePoll(api.calls, 2_000)
   const events = usePoll(api.events, 2_000).data ?? []
   const services = usePoll(api.services, 30_000).data
+  const scores = usePoll(api.scores, 10_000).data
   useEffect(() => {
     location.hash = tab
   }, [tab])
@@ -517,6 +586,7 @@ export function App() {
         {(
           [
             ['live', 'Live'],
+            ['vendors', 'Vendors'],
             ['reconciliation', 'Reconciliation'],
             ['services', 'Services'],
           ] as const
@@ -528,6 +598,7 @@ export function App() {
       </nav>
       {tab === 'live' ? <LiveTab calls={calls} events={events} info={info} onOpen={setOpen} /> : null}
       {tab === 'reconciliation' ? <ReconciliationTab calls={calls} info={info} /> : null}
+      {tab === 'vendors' ? <VendorsTab scores={scores} info={info} /> : null}
       {tab === 'services' ? <ServicesTab services={services} info={info} /> : null}
       <footer className="foot">
         A disclosed Fermata verifier signs each verdict; every verdict points at a TLSNotary presentation anyone can download and

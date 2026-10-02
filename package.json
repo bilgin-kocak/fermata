@@ -29,6 +29,7 @@
     "service:register": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/register-service.ts",
     "demo:mcp": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/mcp.ts",
     "demo:real": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/real.ts",
+    "scores": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/scores.ts",
     "mcp": "tsx apps/mcp/src/index.ts"
   },
   "devDependencies": {

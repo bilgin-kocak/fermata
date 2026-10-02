@@ -27,6 +27,8 @@ export type GatewayConfig = {
   attestorUrl: string
   storageDir: string
   sweepIntervalMs: number
+  /** First block to scan for vendor scores (the escrow's deploy block). */
+  fromBlock?: number
   services: ServiceConfig[]
 }
 
@@ -42,6 +44,7 @@ export function loadConfig(path = process.env.GATEWAY_CONFIG ?? 'gateway.config.
     attestorUrl: process.env.ATTESTOR_URL ?? file.attestorUrl ?? 'http://127.0.0.1:7048',
     storageDir: process.env.GATEWAY_STORAGE ?? file.storageDir ?? 'storage/calls',
     sweepIntervalMs: Number(process.env.GATEWAY_SWEEP_MS ?? file.sweepIntervalMs ?? 10_000),
+    fromBlock: Number(process.env.GATEWAY_FROM_BLOCK ?? file.fromBlock ?? 0),
     services: file.services ?? [],
   }
   if (!cfg.escrow) throw new Error('escrow address missing (FERMATA_ESCROW or config.escrow)')

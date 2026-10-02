@@ -9,7 +9,7 @@ import {
   type Transport,
   type WalletClient,
 } from 'viem'
-import { fermataEscrowAbi, getHold, getService, reconcile, type Verdict } from '@fermata/sdk'
+import { fermataEscrowAbi, fetchEscrowLogs, getHold, getService, reconcile, type EscrowLog, type Verdict } from '@fermata/sdk'
 
 export type TxResult = { ok: true; txHash: Hex } | { ok: false; error: string; txHash?: Hex }
 
@@ -24,6 +24,8 @@ export interface GatewayChain {
   claimTimeout(callId: Hex): Promise<TxResult>
   /** Escrow Held/Released/Refunded events from `fromBlock`, oldest first. */
   events(fromBlock: bigint): Promise<EscrowEvent[]>
+  /** Scoring events (ServiceRegistered/Held/Released/Refunded) from `fromBlock` to the head. */
+  escrowLogs(fromBlock: bigint): Promise<{ logs: EscrowLog[]; toBlock: bigint }>
   /** The call's TIP-20 movements, by memo (SDK `reconcile`). */
   movements(token: Address, callId: Hex, fromBlock: bigint): Promise<{ token: Address; from: Address; to: Address; amount: bigint; txHash: Hex; blockNumber: bigint }[]>
 }
@@ -120,6 +122,10 @@ export class ViemChain implements GatewayChain {
           args,
         }
       })
+  }
+
+  escrowLogs(fromBlock: bigint) {
+    return fetchEscrowLogs(this.client as never, this.escrow, fromBlock)
   }
 
   movements(token: Address, callId: Hex, fromBlock: bigint) {

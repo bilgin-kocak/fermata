@@ -5,11 +5,11 @@ import { Credential, Receipt } from 'mppx'
 import { discovery } from 'mppx/hono'
 import { Mppx, tempo } from 'mppx/server'
 import { isAddressEqual, parseEventLogs, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
-import { fermataEscrowAbi, fermataServer, MODERATO, originHash, requestHash } from '@fermata/sdk'
+import { aggregateScores, fermataEscrowAbi, fermataServer, MODERATO, originHash, requestHash, serviceLabelOf, type EscrowLog } from '@fermata/sdk'
 import type { Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
-import { mcpHandler } from './mcp.ts'
+import { mcpHandler, toolFor } from './mcp.ts'
 import { FINAL, type CallRecord, type CallStore } from './store.ts'
 
 export type GatewayDeps = {
@@ -216,6 +216,45 @@ export async function createGateway(deps: GatewayDeps) {
       })),
     ),
   )
+  // Vendor scores from the escrow's own events (the same code as `pnpm scores`): refreshed at most
+  // every 5 s, reading only blocks not yet seen.
+  const scoreState: { logs: EscrowLog[]; next: bigint; at: number; pending?: Promise<void> } = { logs: [], next: BigInt(deps.config.fromBlock ?? 0), at: 0 }
+  const refreshScores = async () => {
+    if (Date.now() - scoreState.at < 5_000) return
+    scoreState.pending ??= (async () => {
+      try {
+        const { logs, toBlock } = await chain.escrowLogs(scoreState.next)
+        scoreState.logs.push(...logs)
+        scoreState.next = toBlock + 1n
+        scoreState.at = Date.now()
+      } finally {
+        scoreState.pending = undefined
+      }
+    })()
+    await scoreState.pending
+  }
+  app.get('/scores', async (c) => {
+    await refreshScores()
+    const scores = aggregateScores(scoreState.logs).map((s) => {
+      const svc = services.get(s.serviceId.toLowerCase())
+      return {
+        ...s,
+        label: serviceLabelOf(s.serviceId) ?? null,
+        known: !!svc,
+        upstream: svc?.upstream ?? null,
+        summary: svc?.summary ?? null,
+        tool: svc ? toolFor(svc).name : null,
+        fewCalls: s.settled < 20,
+      }
+    })
+    return c.json(plain({
+      escrow: chain.escrow, chainId: chain.chainId, scannedTo: scoreState.next - 1n, method: 'Wilson 95 % lower bound of released / settled, from ServiceRegistered/Held/Released/Refunded events only',
+      recompute: 'pnpm scores --chain <anvil|moderato> --escrow <escrow>',
+      caveats: ['Only calls paid through Fermata count.', 'A vendor could pay itself to inflate its score; distinct agents are shown for that reason.'],
+      scores,
+    }))
+  })
+
   app.get('/calls', async (c) => c.json(await store.list()))
   app.get('/calls/:callId', async (c) => {
     const record = await store.get(c.req.param('callId')).catch(() => undefined)

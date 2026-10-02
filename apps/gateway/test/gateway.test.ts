@@ -65,6 +65,10 @@ class FakeChain implements GatewayChain {
   async events(_: bigint) {
     return this.settled.map((x) => ({ event: x.outcome === 1 ? 'Released' : 'Refunded', callId: x.callId, serviceId: sid, blockNumber: 2n, txHash: keccak256(toHex(`settle-${x.callId}`)), args: {} })) as never
   }
+  scoringLogs: import('@fermata/sdk').EscrowLog[] = []
+  async escrowLogs(fromBlock: bigint) {
+    return { logs: this.scoringLogs.filter((l) => l.blockNumber >= fromBlock), toBlock: 100n }
+  }
   async movements(_: Address, callId: Hex) {
     const tx = keccak256(toHex('m'))
     const hold = { token, from: agent, to: escrow, amount: 10_000n, txHash: tx, blockNumber: 1n }
@@ -316,7 +320,7 @@ type ToolResult = { content: { type: string; text: string }[]; isError?: boolean
 describe('gateway MCP endpoint', () => {
   it('lists every service as a paid tool plus the free fermata_* tools', async () => {
     const { tools } = await (await mcpClient(false)).listTools()
-    expect(tools.map((t) => t.name)).toEqual(['call_quote', 'fermata_call', 'fermata_verify', 'fermata_reconcile'])
+    expect(tools.map((t) => t.name)).toEqual(['call_quote', 'fermata_vendor_scores', 'fermata_call', 'fermata_verify', 'fermata_reconcile'])
     const quote = tools[0]!
     expect(quote.inputSchema).toMatchObject({ required: ['path'] })
     expect(quote.description).toContain('released to the vendor only if a TLSNotary proof')
@@ -386,6 +390,35 @@ describe('gateway MCP endpoint', () => {
     expect(recon.structuredContent).toMatchObject({ match: true })
     const bad = (await client.callTool({ name: 'fermata_call', arguments: { callId: 'nope' } })) as unknown as ToolResult
     expect(bad.isError).toBe(true)
+  })
+})
+
+describe('vendor scores', () => {
+  it('GET /scores aggregates on-chain events, labels known services and states its caveats', async () => {
+    const other = makeServiceId(agent, 'stranger')
+    const held = (callId: Hex, svc: Hex, block: bigint) => ({ eventName: 'Held' as const, blockNumber: block, transactionHash: callId, args: { callId, serviceId: svc, agent, amount: 10_000n } })
+    const c1 = keccak256(toHex('c1')), c2 = keccak256(toHex('c2')), c3 = keccak256(toHex('c3'))
+    chain.scoringLogs = [
+      held(c1, sid, 1n), { eventName: 'Released', blockNumber: 2n, transactionHash: c1, args: { callId: c1, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: c1 } },
+      held(c2, sid, 3n), { eventName: 'Refunded', blockNumber: 4n, transactionHash: c2, args: { callId: c2, serviceId: sid, amount: 10_000n, presentationHash: `0x${'00'.repeat(32)}` } },
+      held(c3, other, 5n),
+    ]
+    const body = (await (await gw.app.request(`${BASE}/scores`)).json()) as { scores: Record<string, unknown>[]; caveats: string[]; scannedTo: string }
+    expect(body.scannedTo).toBe('100')
+    expect(body.caveats.join(' ')).toContain('pay itself')
+    const mine = body.scores.find((s) => s.serviceId === sid)!
+    expect(mine).toMatchObject({ known: true, label: 'quote', upstream, released: 1, timeouts: 1, settled: 2, deliveryRate: 0.5, fewCalls: true, distinctAgents: 1 })
+    expect(body.scores.find((s) => s.serviceId === other)).toMatchObject({ known: false, label: 'stranger', open: 1, deliveryRate: null })
+  })
+
+  it('MCP fermata_vendor_scores summarises the same numbers for an agent', async () => {
+    const c1 = keccak256(toHex('m1'))
+    chain.scoringLogs = [
+      { eventName: 'Held', blockNumber: 1n, transactionHash: c1, args: { callId: c1, serviceId: sid, agent, amount: 10_000n } },
+      { eventName: 'Released', blockNumber: 2n, transactionHash: c1, args: { callId: c1, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: c1 } },
+    ]
+    const res = (await (await mcpClient(false)).callTool({ name: 'fermata_vendor_scores', arguments: {} })) as unknown as ToolResult
+    expect(res.content[0]!.text).toContain('call_quote: 1/1 delivered (100 %)')
   })
 })
 

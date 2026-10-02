@@ -40,6 +40,26 @@ export type Service = {
   unprotectedFallback: { amount: string; recipient: string } | null
 }
 
+export type VendorScore = {
+  serviceId: string
+  label: string | null
+  known: boolean
+  upstream: string | null
+  summary: string | null
+  tool: string | null
+  held: number
+  released: number
+  provenFailures: number
+  timeouts: number
+  open: number
+  settled: number
+  deliveryRate: number | null
+  score: number
+  distinctAgents: number
+  fewCalls: boolean
+}
+export type Scores = { escrow: string; chainId: number; scannedTo: string; method: string; recompute: string; caveats: string[]; scores: VendorScore[] }
+
 export type Movement = { token: string; from: string; to: string; amount: string; txHash: string; blockNumber: string }
 export type Reconciliation = { callId: string; status: CallStatus; token: string; expected: string; match: boolean; movements: Movement[] }
 
@@ -65,6 +85,7 @@ export const api = {
   calls: () => json<Call[]>('/calls'),
   events: () => json<EscrowEvent[]>('/events?since=0'),
   services: () => json<Service[]>('/services'),
+  scores: () => json<Scores>('/scores'),
   reconcile: (callId: string) => json<Reconciliation>(`/reconcile/${callId}`),
   reverify: (callId: string) => json<Reverify>(`/proofs/${callId}/verify`, { method: 'POST' }),
   proofUrl: (callId: string) => `/proofs/${callId}`,
