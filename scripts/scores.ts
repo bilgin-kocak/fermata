@@ -4,6 +4,7 @@
 // escrow's ServiceRegistered / Held / Released / Refunded events and ranks services by the Wilson
 // 95 % lower bound of their delivery rate (packages/sdk/src/scores.ts). The gateway's /scores and
 // the dashboard's Vendors tab run the same code; this is how anyone checks them.
+import { existsSync, readFileSync } from 'node:fs'
 import { createPublicClient, http, type Address } from 'viem'
 import { aggregateScores, escrowDeployment, fetchEscrowLogs, serviceLabelOf, tempoChain } from '@fermata/sdk'
 import { chainArg, loadDotEnv, parseArgs, rpcFor } from './lib/args.ts'
@@ -12,9 +13,14 @@ import { toJson } from './lib/tempo.ts'
 loadDotEnv()
 const args = parseArgs()
 const chain = chainArg(args)
-const rpc = rpcFor(chain, args)
+// A running demo stack (scripts/demo-stack.sh) on this chain supplies the defaults: its Anvil listens on
+// 8549, not 8545, and in public mode it may run its own escrow.
+const stackFile = new URL('../out/demo/stack.json', import.meta.url)
+const stack = existsSync(stackFile) ? (JSON.parse(readFileSync(stackFile, 'utf8')) as { chain?: string; rpc?: string; escrow?: string }) : undefined
+const fromStack = stack?.chain === chain ? stack : undefined
+const rpc = typeof args.rpc !== 'string' && chain === 'anvil' && !process.env.ANVIL_RPC_URL && fromStack?.rpc ? fromStack.rpc : rpcFor(chain, args)
 const deployment = escrowDeployment(chain)
-const escrow = (typeof args.escrow === 'string' ? args.escrow : (process.env.FERMATA_ESCROW || deployment?.address)) as Address | undefined
+const escrow = (typeof args.escrow === 'string' ? args.escrow : (process.env.FERMATA_ESCROW || fromStack?.escrow || deployment?.address)) as Address | undefined
 if (!escrow) throw new Error(`no escrow: pass --escrow (no ${chain} deployment in deployments.json)`)
 const fromBlock = BigInt(typeof args['from-block'] === 'string' ? args['from-block'] : (deployment?.address.toLowerCase() === escrow.toLowerCase() ? deployment.deployBlock : 0))
 

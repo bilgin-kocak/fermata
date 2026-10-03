@@ -90,7 +90,7 @@ if [ "$CHAIN" = anvil ]; then
   echo "== anvil + escrow"
   # Public mode mines a block every second, like a real chain, so settlement windows close on their own.
   ANVIL_ARGS=(); [ "${PUBLIC:-0}" = 1 ] && ANVIL_ARGS=(--block-time 1)
-  bg anvil anvil --chain-id 42431 --port "$ANVIL_PORT" --silent "${ANVIL_ARGS[@]}"
+  bg anvil anvil --chain-id 42431 --port "$ANVIL_PORT" --silent ${ANVIL_ARGS[@]+"${ANVIL_ARGS[@]}"}
   wait_port "$ANVIL_PORT"
   cp packages/sdk/src/deployments.json "$DIR/deployments.backup.json"
   bash scripts/deploy-escrow.sh --chain anvil --rpc "$RPC" > "$DIR/deploy.log" 2>&1 || { tail -20 "$DIR/deploy.log"; exit 1; }
@@ -118,7 +118,7 @@ for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT; do RESOLVE+=(--resolve "ven
 # tunnel; local demo vendors (pinned with --resolve) never are.
 PROXY_ENV=(); UPSTREAM_PROXY=${FERMATA_UPSTREAM_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}
 [ -n "$UPSTREAM_PROXY" ] && PROXY_ENV=(FERMATA_UPSTREAM_PROXY="$UPSTREAM_PROXY")
-bg attestor env "${PROXY_ENV[@]}" VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
+bg attestor env ${PROXY_ENV[@]+"${PROXY_ENV[@]}"} VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
   --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla --predicate apps/attestor/predicates --predicate "$STATE/predicates" --storage "$STATE/presentations" \
   --attempt-timeout-secs 10 "${RESOLVE[@]}"
 wait_port $ATTESTOR_PORT
@@ -169,7 +169,7 @@ if [ "${PUBLIC:-0}" = 1 ]; then
       0x20C0000000000000000000000000000000000000 'transfer(address,uint256)' "$(cast wallet address "$DEMO_AGENT_PRIVATE_KEY")" 10000000 > /dev/null
   fi
   PUBLIC_ENV=(GATEWAY_PUBLIC=1 DEMO_AGENT_PRIVATE_KEY="${DEMO_AGENT_PRIVATE_KEY:?set DEMO_AGENT_PRIVATE_KEY in .env (a funded testnet key)}"
-    ONBOARD_PREDICATE_DIR="$(cd "$STATE" && pwd)/predicates" ONBOARD_SERVICES_FILE="$(cd "$STATE" && pwd)/onboarded.json" "${PROXY_ENV[@]}")
+    ONBOARD_PREDICATE_DIR="$(cd "$STATE" && pwd)/predicates" ONBOARD_SERVICES_FILE="$(cd "$STATE" && pwd)/onboarded.json" ${PROXY_ENV[@]+"${PROXY_ENV[@]}"})
   # services onboarded before this start keep being served
   if [ -f "$STATE/onboarded.json" ]; then
     jq -s '.[0].services = ((.[0].services + (.[1].services // [])) | unique_by(.serviceId | ascii_downcase)) | .[0]' "$CONFIG" "$STATE/onboarded.json" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
@@ -178,7 +178,7 @@ if [ "${PUBLIC:-0}" = 1 ]; then
 fi
 
 echo "== gateway"
-bg gateway env "${PUBLIC_ENV[@]}" GATEWAY_CONFIG=$CONFIG GATEWAY_PORT=$GATEWAY_PORT GATEWAY_STORAGE=$STATE/calls GATEWAY_SWEEP_MS=2000 GATEWAY_REALM=${GATEWAY_REALM:-127.0.0.1} \
+bg gateway env ${PUBLIC_ENV[@]+"${PUBLIC_ENV[@]}"} GATEWAY_CONFIG=$CONFIG GATEWAY_PORT=$GATEWAY_PORT GATEWAY_STORAGE=$STATE/calls GATEWAY_SWEEP_MS=2000 GATEWAY_REALM=${GATEWAY_REALM:-127.0.0.1} \
   TEMPO_RPC_URL=$RPC FERMATA_ESCROW=$ESCROW ATTESTOR_URL=http://127.0.0.1:$ATTESTOR_PORT GATEWAY_EXPLORER=$EXPLORER \
   GATEWAY_FROM_BLOCK="$(jq -r ".FermataEscrow.networks.$CHAIN.deployBlock // 0" packages/sdk/src/deployments.json)" \
   RELAYER_PRIVATE_KEY=$RELAYER_KEY GATEWAY_SECRET_KEY=$SECRET GATEWAY_UPSTREAM_CA=$CA \

@@ -417,8 +417,20 @@ export async function createGateway(deps: GatewayDeps) {
     serviceInfo: { name: 'fermata-gateway', description: 'Pay on proof: escrowed machine payments released on TLSNotary evidence' } as never,
   } as never)
 
-  /** One sweep: retry pending settlements inside the window; claimTimeout after it. */
-  async function sweep() {
+  /**
+   * One sweep: retry pending settlements inside the window; claimTimeout after it. Sweeps never overlap:
+   * a caller that arrives mid-sweep shares it. Otherwise a tick that starts while the previous one still
+   * waits for its claimTimeout receipt sees the hold finalised and marks the call `closed`.
+   */
+  let sweeping: Promise<string[]> | undefined
+  function sweep(): Promise<string[]> {
+    sweeping ??= sweepOnce().finally(() => {
+      sweeping = undefined
+    })
+    return sweeping
+  }
+
+  async function sweepOnce() {
     const now = await chain.now()
     const done: string[] = []
     for (const record of await store.list()) {

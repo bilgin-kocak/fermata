@@ -272,7 +272,7 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
 - [x] **README "How Fermata compares".** Covers x402/MPP receipts, Bursar, Recourse and ERC-8183,
   plus the ERC-8183 mapping. Checked against their repos and the ERC text; x402r and the x402
   escrow proposal weren't reachable from here, so they are left out.
-- [ ] MCP on Moderato: same commands with a Moderato gateway (Bilgin, outside this environment).
+- [x] MCP on Moderato (2026-10-03): `pnpm demo:mcp --chain moderato` 6/6 PASS.
 - [x] **A real third-party vendor (2026-10-02).**
   - Attestor: `--roots mozilla` uses tlsn's `mozilla-certs` feature; `webpki-root-certs` was already
     in the tree, so no new crate. `--upstream-proxy` is an HTTP CONNECT tunnel for the vendor socket
@@ -294,6 +294,16 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
   - Onboarding: `/onboard/*` with the SSRF guard, the TLS-profile probe, predicate drafting, on-chain registration and `addService`; the attestor reloads predicates on a miss; the List your API tab.
   - Deploy kit (`deploy/`): install, bootstrap, systemd, Caddy, smoke; `run` supervision; `FERMATA_STATE_DIR`.
   - Gateway tests: 86. `demo:onboard` 7/7, `smoke.sh` 7/7, shellcheck clean.
+- [x] **Fixes from a macOS run on Moderato (2026-10-03).**
+  - Gateway: overlapping sweeps (2 s ticks, but a Moderato `claimTimeout` receipt takes longer) marked
+    a timed-out call `closed`, and its reconciliation then failed. Sweeps no longer overlap; a
+    regression test covers it. `demo:cases` on Moderato failed about 1 run in 3; it then passed 3 runs out of 3.
+  - `demo-stack.sh` and `probe-tls.sh`: empty arrays under `set -u` crashed macOS's bash 3.2.
+  - `probe-tls.sh`: now works with OpenSSL 1.1, OpenSSL 3.6 and LibreSSL (flags and output differ), and with or without `timeout`.
+  - `pnpm scores` reads the running demo stack's RPC and escrow; the stack's Anvil is on 8549.
+  - `demo:cases` waits for receipts and retries reconciliation on a lagging RPC node.
+  - README: `corepack enable pnpm`, because an older global pnpm cannot read the lockfile.
+  - `probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`: PASS.
 - [ ] Deploy to a VM (Bilgin, `deploy/README.md`), then add the live URL to README, SUBMISSION and the deck.
 - [ ] Pitch video, recorded by Bilgin from the deck's speaker notes. The rules (secondary source)
   ask for a pitch video separate from the demo video.

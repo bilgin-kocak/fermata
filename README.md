@@ -295,6 +295,8 @@ Comparison checked against each project's public repository or specification on 
 ## Quickstart
 
 Requires Foundry 1.8.3, Node ≥ 22.21, pnpm 10 and (for the attestor) Rust 1.95.0 via rustup.
+`corepack enable pnpm` makes `pnpm` use the version pinned in `package.json` (an older global pnpm
+cannot read the lockfile). Tested on Linux and macOS (bash 3.2).
 
 ```sh
 git clone https://github.com/bilgin-kocak/fermata && cd fermata

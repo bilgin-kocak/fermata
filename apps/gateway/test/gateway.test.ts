@@ -229,6 +229,27 @@ describe('gateway', () => {
     expect((await store.get(r.callId as string))?.status).toBe('timed-out')
   })
 
+  it('overlapping sweeps: a slow claimTimeout is not re-marked closed by the next tick', async () => {
+    // On Moderato the receipt wait outlasts the 2 s sweep interval: the claim is already mined (hold
+    // finalised) when the next tick starts, which used to overwrite `timed-out` with `closed`.
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'vendor never answered' })
+    const callId = receiptOf(await agentFetch()(`/s/${sid}/v1/quote?symbol=BTC-USD`)).callId as Hex
+    chain.time = 1_121n
+    const claim = chain.claimTimeout.bind(chain)
+    chain.claimTimeout = async (id) => {
+      const r = await claim(id) // mined: status 4 on-chain
+      await new Promise((ok) => setTimeout(ok, 50)) // still waiting for the receipt
+      return r
+    }
+    const first = gw.sweep()
+    await new Promise((ok) => setTimeout(ok, 10))
+    const [a, b] = await Promise.all([first, gw.sweep()])
+    expect(a).toEqual([callId])
+    expect(b).toEqual([callId])
+    expect(chain.timeouts).toEqual([callId])
+    expect((await store.get(callId))?.status).toBe('timed-out')
+  })
+
   it('binding check failed: 502, awaiting timeout, no verdict', async () => {
     attestor.next = () => ({ kind: 'rejected', check: 'origin', detail: 'wrong server' })
     const res = await agentFetch()(`/s/${sid}/v1/quote?symbol=BTC-USD`)

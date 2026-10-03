@@ -31,7 +31,13 @@ async function run(name: string, fn: (r: Result) => Promise<void>) {
 const check = (r: Result, ok: boolean, note: string) => (r as Result & { check: (o: boolean, n: string) => void }).check(ok, note)
 
 async function reconciled(r: Result, callId: Hex, expected: bigint[]) {
-  const rec = await gw<{ match: boolean; movements: { amount: string }[] }>(`/reconcile/${callId}`)
+  // A load-balanced RPC (Moderato) can answer from a node a block behind the settle tx: retry briefly.
+  const ok = (x: { match: boolean; movements: { amount: string }[] }) => x.match && x.movements.map((m) => BigInt(m.amount)).join() === expected.join()
+  let rec = await gw<{ match: boolean; movements: { amount: string }[] }>(`/reconcile/${callId}`)
+  for (let i = 0; i < 10 && !ok(rec); i++) {
+    await sleep(1_500)
+    rec = await gw(`/reconcile/${callId}`)
+  }
   check(r, rec.match && rec.movements.map((m) => BigInt(m.amount)).join() === expected.join(), `reconciled by memo: ${rec.movements.map((m) => m.amount).join(' → ')}`)
 }
 
@@ -42,7 +48,7 @@ await run('1 release (vendor delivers)', async (r) => {
   const body = (await res.json()) as { price?: number }
   check(r, res.status === 200 && typeof body.price === 'number', `agent got the proved quote (HTTP ${res.status}, price ${body.price})`)
   check(r, rc.outcome === 'DELIVERED', `verdict ${rc.outcome}`)
-  const settle = await client.getTransactionReceipt({ hash: rc.txHash })
+  const settle = await client.waitForTransactionReceipt({ hash: rc.txHash })
   const [released] = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Released', logs: settle.logs })
   check(r, !!released && released.args.amount - released.args.fee === 9_950n && released.args.fee === 50n, 'Released: vendor 9,950, treasury 50 (0.5 %)')
   const proof = new Uint8Array(await (await fetch(`${stack.gateway}/proofs/${rc.callId}`)).arrayBuffer())
@@ -58,7 +64,7 @@ await run('2 verified-failure refund (authenticated 500)', async (r) => {
   const rc = receiptOf(res)
   r.callId = rc.callId; r.outcome = rc.outcome
   check(r, res.status === 500 && rc.outcome === 'FAILED', `vendor's proved 500 returned, verdict ${rc.outcome}`)
-  const settle = await client.getTransactionReceipt({ hash: rc.txHash })
+  const settle = await client.waitForTransactionReceipt({ hash: rc.txHash })
   const [refunded] = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Refunded', logs: settle.logs })
   check(r, !!refunded && refunded.args.amount === 10_000n && refunded.args.presentationHash !== zeroHash, 'Refunded in full, backed by a presentation')
   await reconciled(r, rc.callId, [10_000n, 10_000n])
@@ -86,7 +92,7 @@ await run('3 timeout refund (vendor never answers)', async (r) => {
   if (stack.chain !== 'anvil') process.stdout.write('\n')
   check(r, call.status === 'timed-out', `gateway sweeper sent claimTimeout (${call.status})`)
   if (call.timeoutTx) {
-    const logs = (await client.getTransactionReceipt({ hash: call.timeoutTx })).logs
+    const logs = (await client.waitForTransactionReceipt({ hash: call.timeoutTx })).logs
     const [refunded] = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Refunded', logs })
     check(r, refunded?.args.presentationHash === zeroHash, 'Refunded with presentationHash 0 (timeout)')
   }
