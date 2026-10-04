@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { Address, Hex } from 'viem'
+import { escrowDeployment } from '@fermata/sdk'
 
 export type ServiceConfig = {
   serviceId: Hex
@@ -36,6 +37,11 @@ export type GatewayConfig = {
   services: ServiceConfig[]
 }
 
+/** The deploy block recorded in the SDK's deployments.json for this escrow address, if any. */
+function deployBlockOf(escrow: Address): number | undefined {
+  return (['moderato', 'anvil'] as const).map(escrowDeployment).find((d) => d && d.address.toLowerCase() === escrow.toLowerCase())?.deployBlock
+}
+
 /** `gateway.config.json` (path from GATEWAY_CONFIG) with env overrides for deployment specifics. */
 export function loadConfig(path = process.env.GATEWAY_CONFIG ?? 'gateway.config.json'): GatewayConfig {
   const file = JSON.parse(readFileSync(path, 'utf8')) as Partial<GatewayConfig>
@@ -48,11 +54,13 @@ export function loadConfig(path = process.env.GATEWAY_CONFIG ?? 'gateway.config.
     attestorUrl: process.env.ATTESTOR_URL ?? file.attestorUrl ?? 'http://127.0.0.1:7048',
     storageDir: process.env.GATEWAY_STORAGE ?? file.storageDir ?? 'storage/calls',
     sweepIntervalMs: Number(process.env.GATEWAY_SWEEP_MS ?? file.sweepIntervalMs ?? 10_000),
-    fromBlock: Number(process.env.GATEWAY_FROM_BLOCK ?? file.fromBlock ?? 0),
+    fromBlock: 0,
     services: file.services ?? [],
     demo: file.demo,
   }
   if (!cfg.escrow) throw new Error('escrow address missing (FERMATA_ESCROW or config.escrow)')
+  // Scan escrow events from its deploy block, not genesis (Moderato is ~38M blocks deep).
+  cfg.fromBlock = Number(process.env.GATEWAY_FROM_BLOCK || file.fromBlock || deployBlockOf(cfg.escrow) || 0)
   if (cfg.services.length === 0) throw new Error('no services configured')
   return cfg
 }

@@ -10,6 +10,7 @@
 // pay itself to inflate its score; distinct agents are reported for that reason.
 import { type Address, type Hex, type PublicClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
+import { scanBlocks } from './logs.ts'
 
 const ZERO32 = `0x${'00'.repeat(32)}`
 
@@ -121,24 +122,15 @@ export async function fetchEscrowLogs(
   opts: { toBlock?: bigint; chunk?: bigint } = {},
 ): Promise<{ logs: EscrowLog[]; toBlock: bigint }> {
   const toBlock = opts.toBlock ?? (await client.getBlockNumber())
-  let chunk = opts.chunk ?? 50_000n
   const logs: EscrowLog[] = []
-  let from = fromBlock
-  while (from <= toBlock) {
-    const to = from + chunk - 1n < toBlock ? from + chunk - 1n : toBlock
-    try {
-      const batch = await client.getContractEvents({ address: escrow, abi: fermataEscrowAbi, fromBlock: from, toBlock: to })
-      for (const l of batch) {
-        if (['ServiceRegistered', 'Held', 'Released', 'Refunded'].includes(l.eventName)) {
-          logs.push({ eventName: l.eventName, blockNumber: l.blockNumber, transactionHash: l.transactionHash, args: l.args } as EscrowLog)
-        }
+  await scanBlocks(fromBlock, toBlock, async (from, to) => {
+    const batch = await client.getContractEvents({ address: escrow, abi: fermataEscrowAbi, fromBlock: from, toBlock: to })
+    for (const l of batch) {
+      if (['ServiceRegistered', 'Held', 'Released', 'Refunded'].includes(l.eventName)) {
+        logs.push({ eventName: l.eventName, blockNumber: l.blockNumber, transactionHash: l.transactionHash, args: l.args } as EscrowLog)
       }
-      from = to + 1n
-    } catch (e) {
-      if (chunk <= 100n) throw e
-      chunk /= 2n
     }
-  }
+  }, opts.chunk)
   return { logs, toBlock }
 }
 

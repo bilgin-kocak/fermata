@@ -29,7 +29,7 @@ check('refuse unsafe URLs', refused.every((r) => r.status === 400), refused.map(
 
 const label = `viem-${randomBytes(2).toString('hex')}`
 const payout = `0x${randomBytes(20).toString('hex')}`
-const reg = await post('/onboard/register', { url, label, payout, price: '0.01', summary: 'Latest published versions of viem on npm', toolName: 'viem_versions', predicate: probe.body.predicate })
+const reg = await post('/onboard/register', { url, label, payout, price: '0.01', summary: 'Latest published versions of viem on npm', toolName: `viem_versions_${label.replace(/-/g, '_')}`, predicate: probe.body.predicate })
 check('register on-chain', reg.status === 200 && reg.body.ok, reg.body.ok ? `${reg.body.serviceId.slice(0, 18)}… tx ${link(reg.body.txHash)}` : reg.body.error)
 
 const services = await gw<{ serviceId: string }[]>('/services')
@@ -37,12 +37,12 @@ const mcp = new Client({ name: 'demo-onboard', version: '0.0.0' })
 await mcp.connect(new StreamableHTTPClientTransport(new URL(`${stack.gateway}/mcp`)))
 const tools = (await mcp.listTools()).tools.map((t) => t.name)
 await mcp.close()
-check('served, listed and on MCP at once', services.some((s) => s.serviceId === reg.body.serviceId) && tools.includes('viem_versions'), `/services has it; MCP tools include viem_versions`)
+check('served, listed and on MCP at once', services.some((s) => s.serviceId === reg.body.serviceId) && tools.includes(reg.body.tool), `/services has it; MCP tools include ${reg.body.tool}`)
 
 const call = await post('/demo/call', { serviceId: reg.body.serviceId })
 check('paid test call released', call.body.outcome === 'DELIVERED', `HTTP ${call.body.status} ${call.body.outcome ?? call.body.error} settle ${link(call.body.settleTx)}`)
 
-await new Promise((r) => setTimeout(r, 6000)) // the scoreboard refreshes every 5 s
+await new Promise((r) => setTimeout(r, 6000)) // the event cache refreshes at most every 2 s
 const scores = await gw<{ scores: { serviceId: string; released: number; settled: number; tool: string }[] }>('/scores')
 const mine = scores.scores.find((s) => s.serviceId.toLowerCase() === String(reg.body.serviceId).toLowerCase())
 check('on the vendor scoreboard', mine?.released === 1, mine ? `${mine.tool}: ${mine.released}/${mine.settled} delivered` : 'missing')

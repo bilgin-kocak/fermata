@@ -89,7 +89,7 @@ export async function createGateway(deps: GatewayDeps) {
   const log = deps.log ?? ((m: string) => console.log(`[gateway] ${m}`))
   const services = await loadServices(deps)
   const { chain, store, attestor } = deps
-  const fermataHandler = fermataServer({ client: deps.publicClient, escrow: chain.escrow })
+  const fermataHandler = fermataServer({ client: deps.publicClient, escrow: chain.escrow, secretKey: deps.secretKey })
   const tempoHandler = tempo.charge({ testnet: true } as never)
   const mppx = Mppx.create({ secretKey: deps.secretKey, realm: deps.config.realm, methods: [fermataHandler, tempoHandler] })
 
@@ -193,6 +193,11 @@ export async function createGateway(deps: GatewayDeps) {
   }
 
   const app = new Hono()
+  // Errors as JSON (the dashboard shows `error`), never Hono's plain-text 500.
+  app.onError((e, c) => {
+    log(`${c.req.method} ${c.req.path} failed: ${e.message}`)
+    return c.json({ error: (e as { shortMessage?: string }).shortMessage ?? 'internal error' }, 500)
+  })
 
   const paid = async (c: import('hono').Context) => {
     const sidParam = c.req.param('serviceId') ?? ''
@@ -235,26 +240,27 @@ export async function createGateway(deps: GatewayDeps) {
       })),
     ),
   )
-  // Vendor scores from the escrow's own events (the same code as `pnpm scores`): refreshed at most
-  // every 5 s, reading only blocks not yet seen.
-  const scoreState: { logs: EscrowLog[]; next: bigint; at: number; pending?: Promise<void> } = { logs: [], next: BigInt(deps.config.fromBlock ?? 0), at: 0 }
-  const refreshScores = async () => {
-    if (Date.now() - scoreState.at < 5_000) return
-    scoreState.pending ??= (async () => {
+  // The escrow's events since its deploy block, shared by the vendor scores (the same code as
+  // `pnpm scores`) and the live feed: refreshed at most every 2 s, in chunks, reading only blocks not
+  // yet seen, so dashboards polling /events cost one small getLogs per refresh, not one per viewer.
+  const logCache: { logs: EscrowLog[]; next: bigint; at: number; pending?: Promise<void> } = { logs: [], next: BigInt(deps.config.fromBlock ?? 0), at: 0 }
+  const refreshLogs = async () => {
+    if (Date.now() - logCache.at < 2_000) return
+    logCache.pending ??= (async () => {
       try {
-        const { logs, toBlock } = await chain.escrowLogs(scoreState.next)
-        scoreState.logs.push(...logs)
-        scoreState.next = toBlock + 1n
-        scoreState.at = Date.now()
+        const { logs, toBlock } = await chain.escrowLogs(logCache.next)
+        logCache.logs.push(...logs)
+        if (toBlock + 1n > logCache.next) logCache.next = toBlock + 1n
+        logCache.at = Date.now()
       } finally {
-        scoreState.pending = undefined
+        logCache.pending = undefined
       }
     })()
-    await scoreState.pending
+    await logCache.pending
   }
   app.get('/scores', async (c) => {
-    await refreshScores()
-    const scores = aggregateScores(scoreState.logs).map((s) => {
+    await refreshLogs()
+    const scores = aggregateScores(logCache.logs).map((s) => {
       const svc = services.get(s.serviceId.toLowerCase())
       return {
         ...s,
@@ -267,7 +273,7 @@ export async function createGateway(deps: GatewayDeps) {
       }
     })
     return c.json(plain({
-      escrow: chain.escrow, chainId: chain.chainId, scannedTo: scoreState.next - 1n, method: 'Wilson 95 % lower bound of released / settled, from ServiceRegistered/Held/Released/Refunded events only',
+      escrow: chain.escrow, chainId: chain.chainId, scannedTo: logCache.next - 1n, method: 'Wilson 95 % lower bound of released / settled, from ServiceRegistered/Held/Released/Refunded events only',
       recompute: 'pnpm scores --chain <anvil|moderato> --escrow <escrow>',
       caveats: ['Only calls paid through Fermata count.', 'A vendor could pay itself to inflate its score; distinct agents are shown for that reason.'],
       scores,
@@ -294,22 +300,41 @@ export async function createGateway(deps: GatewayDeps) {
     }),
   )
 
+  /** The newest `limit` (default 200) Held/Released/Refunded events from block `since`, oldest first (from the event cache). */
   app.get('/events', async (c) => {
     const since = BigInt(c.req.query('since') ?? '0')
-    return c.json(plain(await chain.events(since)))
+    const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 200) || 200, 1), 1000)
+    await refreshLogs()
+    const events = logCache.logs
+      .filter((l) => l.eventName !== 'ServiceRegistered' && l.blockNumber >= since)
+      .slice(-limit)
+      .map((l) => {
+        const args = l.args as { callId: Hex; serviceId: Hex }
+        return { event: l.eventName, callId: args.callId, serviceId: args.serviceId, blockNumber: l.blockNumber, txHash: l.transactionHash, args: l.args }
+      })
+    return c.json(plain(events))
   })
 
-  const receiptLogs = async (hash?: Hex) =>
-    hash ? (await deps.publicClient.getTransactionReceipt({ hash }).catch(() => undefined))?.logs ?? [] : []
+  const receiptOf = (hash?: Hex) => (hash ? deps.publicClient.getTransactionReceipt({ hash }).catch(() => undefined) : Promise.resolve(undefined))
+  const receiptLogs = async (hash?: Hex) => (await receiptOf(hash))?.logs ?? []
 
   /** An accountant's view of one call: every TIP-20 movement tagged with its callId, checked against the outcome. */
   app.get('/reconcile/:callId', async (c) => {
     const record = await store.get(c.req.param('callId')).catch(() => undefined)
     if (!record) return c.json({ error: 'unknown call' }, 404)
-    const svc = services.get(record.serviceId.toLowerCase())!
-    const holdReceipt = await deps.publicClient.getTransactionReceipt({ hash: record.holdTx }).catch(() => undefined)
-    const movements = await chain.movements(svc.token as Address, record.callId, holdReceipt?.blockNumber ?? 0n)
+    const svc = services.get(record.serviceId.toLowerCase())
+    if (!svc) return c.json({ error: 'service no longer served' }, 404)
+    // Scan from the hold's block to the settlement's: one getLogs (the RPC caps the range). Without a
+    // known settlement, at most one window's worth of blocks.
+    const [holdReceipt, finalReceipt] = await Promise.all([receiptOf(record.holdTx), receiptOf(record.settleTx ?? record.timeoutTx)])
+    if (!holdReceipt) return c.json({ error: 'hold receipt not available from the RPC; try again' }, 503)
+    const toBlock = finalReceipt?.blockNumber ?? holdReceipt.blockNumber + 99_999n
+    const all = await chain.movements(svc.token as Address, record.callId, holdReceipt.blockNumber, toBlock)
     const eq = (a: string, b?: string) => !!b && a.toLowerCase() === b.toLowerCase()
+    // Anyone can send a transfer carrying this memo, even into the escrow: only the agent's hold and
+    // the escrow's own payouts count (the escrow only ever pays out with the settled call's memo).
+    const ownHold = (m: { from: string; to: string; txHash: string }) => eq(m.to, chain.escrow) && (record.agent ? eq(m.from, record.agent) : eq(m.txHash, record.holdTx))
+    const movements = all.filter((m) => eq(m.from, chain.escrow) || ownHold(m))
     const holdOk = movements.length > 0 && eq(movements[0]!.to, chain.escrow) && movements[0]!.amount === svc.price
     const rest = movements.slice(1)
     const settledTotal = rest.reduce((sum, m) => sum + m.amount, 0n)
@@ -324,7 +349,7 @@ export async function createGateway(deps: GatewayDeps) {
       (record.status === 'released' ? settled && !toAgent
         : record.status === 'refunded' || record.status === 'timed-out' ? settled && toAgent
         : rest.length === 0)
-    return c.json(plain({ callId: record.callId, status: record.status, token: svc.token, expected, match, movements }))
+    return c.json(plain({ callId: record.callId, status: record.status, token: svc.token, expected, match, movements, ignored: all.length - movements.length }))
   })
 
   /** Re-verify a call's proof offline (attestor, no key) and compare every hash with the chain. */
@@ -383,7 +408,11 @@ export async function createGateway(deps: GatewayDeps) {
   }
   if (deps.onboard) {
     const ob = deps.onboard
-    onboardRoutes(app, { ...ob, register: (input) => ob.register(input, addService) })
+    onboardRoutes(app, {
+      ...ob,
+      register: (input) => ob.register(input, addService),
+      toolTaken: (name) => [...services.values()].some((s) => toolFor(s).name === name),
+    })
   }
 
   if (deps.demo) publicRoutes(app, { ...deps.demo, examplePath: (sid) => services.get(sid.toLowerCase())?.examplePath })
@@ -456,5 +485,5 @@ export async function createGateway(deps: GatewayDeps) {
     return done
   }
 
-  return { app, services, sweep, mppx, addService }
+  return { app, services, sweep, mppx, addService, warmLogs: refreshLogs }
 }

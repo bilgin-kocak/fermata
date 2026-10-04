@@ -15,6 +15,7 @@ import { connect as tlsConnect, rootCertificates, type TLSSocket } from 'node:tl
 import type { Context, Hono } from 'hono'
 import { isAddress, type Address, type Hex } from 'viem'
 import { clientIp, DailyCap, RateLimiter } from './limits.ts'
+import { isReservedToolName } from './mcp.ts'
 
 // ------------------------------------------------------------------ 1. which URLs may be fetched
 
@@ -256,6 +257,8 @@ export type OnboardDeps = {
   probe: (t: SafeTarget) => Promise<Sample>
   /** Writes the predicate, registers on-chain, adds the service to the running gateway. */
   register: (input: RegisterInput) => Promise<Registered>
+  /** True when a served service already exposes this MCP tool name. */
+  toolTaken?: (name: string) => boolean
   trustProxy?: boolean
   now?: () => number
   perIpProbesPerHour?: number
@@ -271,6 +274,8 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
   const ip = (c: Context) =>
     clientIp(c.req.raw.headers, (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress, !!deps.trustProxy)
   const bad = (c: Context, e: unknown, status: 400 | 422 = 422) => c.json({ error: (e as Error).message.slice(0, 400) }, status)
+  // Tool names being registered right now: two concurrent listings can't both claim one.
+  const claiming = new Set<string>()
 
   app.post('/onboard/probe', async (c) => {
     const { url } = ((await c.req.json().catch(() => ({}))) ?? {}) as { url?: string }
@@ -300,26 +305,35 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
     if (price < 1000n || price > 1_000_000n) return bad(c, new Error('price must be 0.001–1.00'), 400)
     const toolName = String(b.toolName ?? `call_${label.replace(/-/g, '_')}`)
     if (!/^[a-z][a-z0-9_]{2,40}$/.test(toolName)) return bad(c, new Error('tool name: lower case letters, digits and _'), 400)
-    let predicate: Uint8Array
-    let t: SafeTarget
-    try {
-      predicate = canonicalPredicate(b.predicate)
-      t = await guardUrl(String(b.url ?? ''), deps.resolve)
-    } catch (e) {
-      return bad(c, e, 400)
+    // A listing must never take over a tool agents already pay (its payments would go to the new payout).
+    if (isReservedToolName(toolName) || deps.toolTaken?.(toolName) || claiming.has(toolName)) {
+      return c.json({ error: `tool name "${toolName}" is taken; pick another` }, 409)
     }
-    const wait = regsPerIp.take(ip(c))
-    if (wait) return c.json({ error: 'registration limit for this address reached; try tomorrow', retryAfterMs: wait }, 429)
-    if (!regs.take()) return c.json({ error: 'today’s registration budget is used up' }, 429)
+    claiming.add(toolName) // before any await: two concurrent listings can't both pass the check
     try {
-      // The URL must still answer, and its answer must pass the predicate being registered.
-      const sample = await deps.probe(t)
-      const failures = checkSample(JSON.parse(new TextDecoder().decode(predicate)) as Predicate, sample)
-      if (failures.length) return c.json({ error: `the vendor's current answer would fail this predicate: ${failures.join('; ')}` }, 422)
-      const summary = String(b.summary ?? '').slice(0, 200) || `${t.host} (onboarded)`
-      return c.json({ ok: true, ...(await deps.register({ origin: t.origin, examplePath: t.target, label, payout: b.payout as Address, price, predicate, summary, toolName })) })
-    } catch (e) {
-      return bad(c, e)
+      let predicate: Uint8Array
+      let t: SafeTarget
+      try {
+        predicate = canonicalPredicate(b.predicate)
+        t = await guardUrl(String(b.url ?? ''), deps.resolve)
+      } catch (e) {
+        return bad(c, e, 400)
+      }
+      const wait = regsPerIp.take(ip(c))
+      if (wait) return c.json({ error: 'registration limit for this address reached; try tomorrow', retryAfterMs: wait }, 429)
+      if (!regs.take()) return c.json({ error: 'today’s registration budget is used up' }, 429)
+      try {
+        // The URL must still answer, and its answer must pass the predicate being registered.
+        const sample = await deps.probe(t)
+        const failures = checkSample(JSON.parse(new TextDecoder().decode(predicate)) as Predicate, sample)
+        if (failures.length) return c.json({ error: `the vendor's current answer would fail this predicate: ${failures.join('; ')}` }, 422)
+        const summary = String(b.summary ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').trim().slice(0, 200) || `${t.host} (onboarded)`
+        return c.json({ ok: true, ...(await deps.register({ origin: t.origin, examplePath: t.target, label, payout: b.payout as Address, price, predicate, summary, toolName })) })
+      } catch (e) {
+        return bad(c, e)
+      }
+    } finally {
+      claiming.delete(toolName)
     }
   })
 }

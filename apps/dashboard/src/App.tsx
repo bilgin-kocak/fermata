@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Predicate, type ProbeResult, type Reconciliation, type RegisterResult, type Reverify, type Scores, type Service } from './api.ts'
 import { STATUS, age, bytes, serviceLabel, short, usd } from './format.ts'
 
@@ -271,12 +271,17 @@ function CallDrawer({ call, info, onClose }: { call: Call; info?: Info; onClose:
     },
     [call.callId],
   )
+  // Re-verify once per opened call, not on every dashboard poll (onClose is a new function each render).
   useEffect(() => {
     if (hasProof) void run(false)
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+  }, [hasProof, run])
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current()
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
-  }, [hasProof, run, onClose])
+  }, [])
   const req = re ? splitHttp(re.transcript.request) : undefined
   const res = re ? splitHttp(re.transcript.response) : undefined
   const v = call.verdict as Record<string, string | number> | undefined
@@ -489,6 +494,11 @@ function ReconciliationTab({ calls, info }: { calls: Call[]; info?: Info }) {
                           <strong>{usd(m.amount)}</strong> <TxLink hash={m.txHash} info={info} />
                         </div>
                       ))}
+                      {r.ignored ? (
+                        <div className="muted" style={{ marginTop: 4 }}>
+                          {r.ignored} transfer{r.ignored === 1 ? '' : 's'} by others reusing this memo ignored (not to or from the escrow)
+                        </div>
+                      ) : null}
                     </>
                   )}
                 </td>
@@ -498,7 +508,11 @@ function ReconciliationTab({ calls, info }: { calls: Call[]; info?: Info }) {
         </tbody>
       </table>
       <footer className="foot" style={{ padding: '0 14px 12px' }}>
-        Check it yourself: <span className="mono">cast logs --address &lt;pathUSD&gt; 'TransferWithMemo(address,address,uint256,bytes32)' '' '' &lt;callId&gt;</span>
+        Check it yourself:{' '}
+        <span className="mono">
+          cast logs --from-block &lt;hold block&gt; --to-block &lt;settle block&gt; --address &lt;pathUSD&gt; 'TransferWithMemo(address,address,uint256,bytes32)' '' '' &lt;callId&gt; --rpc-url &lt;rpc&gt;
+        </span>{' '}
+        (keep the range under 100,000 blocks: Moderato's limit per query)
       </footer>
     </div>
   )

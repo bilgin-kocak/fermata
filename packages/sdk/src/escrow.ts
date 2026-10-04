@@ -1,5 +1,6 @@
 import type { Account, Address, Chain, Hex, PublicClient, Transport, WalletClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
+import { scanBlocks } from './logs.ts'
 import { tip20Abi, type Movement } from './tip20.ts'
 
 /** `FermataEscrow.Status`. Anything but None is final except Held. */
@@ -16,30 +17,29 @@ export function getService(client: PublicClient, escrow: Address, serviceId: Hex
 
 /**
  * What an accountant sees for one call without any Fermata indexer: every TIP-20 movement whose
- * `TransferWithMemo` memo is `callId`, in chain order (hold, then release/refund).
+ * `TransferWithMemo` memo is `callId`, in chain order (hold, then release/refund). Scans
+ * [fromBlock, toBlock] in chunks, so pass the hold's block as `fromBlock` (and the settlement's
+ * block as `toBlock` when known) to keep it to one query.
+ *
+ * Anyone can send a transfer carrying any memo, so a caller checking an outcome should only count
+ * the legs into and out of the escrow.
  */
 export async function reconcile(
   client: PublicClient,
   opts: { token: Address; callId: Hex; fromBlock?: bigint; toBlock?: bigint },
 ): Promise<(Movement & { txHash: Hex; blockNumber: bigint })[]> {
-  const logs = await client.getContractEvents({
-    address: opts.token,
-    abi: tip20Abi,
-    eventName: 'TransferWithMemo',
-    args: { memo: opts.callId },
-    fromBlock: opts.fromBlock ?? 0n,
-    toBlock: opts.toBlock ?? 'latest',
+  const head = await client.getBlockNumber()
+  const toBlock = opts.toBlock !== undefined && opts.toBlock < head ? opts.toBlock : head // never past the head
+  const found: (Movement & { txHash: Hex; blockNumber: bigint; logIndex: number })[] = []
+  await scanBlocks(opts.fromBlock ?? 0n, toBlock, async (fromBlock, to) => {
+    const logs = await client.getContractEvents({ address: opts.token, abi: tip20Abi, eventName: 'TransferWithMemo', args: { memo: opts.callId }, fromBlock, toBlock: to })
+    for (const l of logs) {
+      found.push({ token: l.address, from: l.args.from!, to: l.args.to!, amount: l.args.amount!, txHash: l.transactionHash, blockNumber: l.blockNumber, logIndex: l.logIndex })
+    }
   })
-  return logs
+  return found
     .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))
-    .map((l) => ({
-      token: l.address,
-      from: l.args.from!,
-      to: l.args.to!,
-      amount: l.args.amount!,
-      txHash: l.transactionHash,
-      blockNumber: l.blockNumber,
-    }))
+    .map(({ logIndex: _, ...m }) => m)
 }
 
 /**

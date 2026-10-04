@@ -126,6 +126,8 @@ const gateway = await createGateway({
   configPath: process.env.ONBOARD_SERVICES_FILE ?? process.env.GATEWAY_CONFIG ?? 'gateway.config.json',
 })
 self = gateway.app
+// Read the escrow's history now, not on the first dashboard visit.
+gateway.warmLogs().catch((e) => console.error(`[gateway] event cache: ${(e as Error).message}`))
 
 setInterval(() => {
   gateway.sweep().catch((e) => console.error(`[gateway] sweep failed: ${(e as Error).message}`))

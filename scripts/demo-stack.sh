@@ -82,7 +82,9 @@ echo "== attestor build"
 BIN=$(cd apps/attestor && realpath "${CARGO_TARGET_DIR:-target}")/release/fermata-attest
 [ -f apps/vendor/certs/ca.pem ] || bash apps/vendor/gen-certs.sh > "$DIR/certs.log"
 CA=$PWD/apps/vendor/certs/ca.pem
-if [ ! -f apps/dashboard/dist/index.html ] && [ -f apps/dashboard/package.json ]; then
+# (Re)build the dashboard when it is missing or older than its sources, so the stack never serves a stale UI.
+if [ -f apps/dashboard/package.json ] && { [ ! -f apps/dashboard/dist/index.html ] ||
+  [ -n "$(find apps/dashboard/src apps/dashboard/index.html apps/dashboard/vite.config.ts apps/dashboard/package.json -newer apps/dashboard/dist/index.html 2>/dev/null | head -1)" ]; }; then
   echo "== dashboard build"; pnpm -s -F @fermata/dashboard build > "$DIR/dashboard-build.log" 2>&1 || echo "dashboard build failed (see $DIR/dashboard-build.log)"
 fi
 

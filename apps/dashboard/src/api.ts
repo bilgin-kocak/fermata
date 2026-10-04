@@ -83,7 +83,7 @@ export type ProbeResult = {
 export type RegisterResult = { ok?: boolean; error?: string; serviceId?: string; txHash?: string; endpoint?: string; tool?: string }
 
 export type Movement = { token: string; from: string; to: string; amount: string; txHash: string; blockNumber: string }
-export type Reconciliation = { callId: string; status: CallStatus; token: string; expected: string; match: boolean; movements: Movement[] }
+export type Reconciliation = { callId: string; status: CallStatus; token: string; expected: string; match: boolean; movements: Movement[]; ignored?: number }
 
 export type Check = { name: string; recomputed: string | null; onchain: string | null; ok: boolean }
 export type Reverify = {

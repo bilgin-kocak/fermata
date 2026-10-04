@@ -123,4 +123,22 @@ describe('onboarding routes', () => {
     expect((await s.post('/onboard/register', { ...good, label: 'other' })).status).toBe(429)
     expect((await s.post('/onboard/register', { ...good, label: 'third' }, '198.51.100.1')).status).toBe(200)
   })
+  it.each([['get_quote'], ['fermata_call'], ['fermata_anything']])('refuses to take over the tool name %s, without spending the rate limit', async (toolName) => {
+    const s = setup({ toolTaken: (n) => n === 'get_quote', perIpRegistrationsPerDay: 1 })
+    const res = await s.post('/onboard/register', { ...good, toolName })
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { error: string }).error).toContain('taken')
+    expect(s.registered).toEqual([])
+    expect((await s.post('/onboard/register', good)).status).toBe(200) // the one daily registration is still there
+  })
+  it('two simultaneous listings cannot claim the same tool name (even behind a slow DNS lookup)', async () => {
+    const slowDns = async (h: string) => (await new Promise((ok) => setTimeout(ok, 20)), h === 'registry.npmjs.org' ? ['104.16.0.34'] : [])
+    const s = setup({ resolve: slowDns })
+    const [a, b] = await Promise.all([
+      s.post('/onboard/register', { ...good, toolName: 'npm_tags' }),
+      s.post('/onboard/register', { ...good, label: 'other', toolName: 'npm_tags' }, '198.51.100.1'),
+    ])
+    expect([a.status, b.status].sort()).toEqual([200, 409])
+    expect(s.registered).toHaveLength(1)
+  })
 })

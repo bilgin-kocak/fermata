@@ -14,6 +14,7 @@ const requestHash = keccak256(toHex('GET /v1/quote'))
 const callId = keccak256(toHex('call-1'))
 const agent = '0x000000000000000000000000000000000000a9e1' as Address
 const txHash = keccak256(toHex('hold-tx'))
+const SECRET = 'unit-test-secret-key-at-least-32-bytes!!'
 
 function heldLog(over: Partial<{ callId: Hex; serviceId: Hex; requestHash: Hex; amount: bigint; address: Address }> = {}) {
   const topics = encodeEventTopics({
@@ -43,21 +44,22 @@ function fakeClient(opts: { logs?: unknown[]; status?: 'success' | 'reverted'; h
 
 const request = { amount: '10000', currency: token, escrow, chainId: 42431, serviceId, requestHash, callId }
 
-function credential(over: Partial<{ callId: Hex; escrow: Address }> = {}) {
+/** A credential on a challenge signed with the server's key (or, with `forged`, with a made-up id). */
+function credential(over: Partial<{ callId: Hex; escrow: Address; forged: boolean }> = {}) {
   const challenge = Challenge.from({
-    id: 'x', realm: 'test', method: 'fermata', intent: 'charge',
+    ...(over.forged ? { id: 'x' } : { secretKey: SECRET }), realm: 'test', method: 'fermata', intent: 'charge',
     request: { ...request, escrow: over.escrow ?? escrow },
   } as never)
   return { challenge, payload: { type: 'hold' as const, txHash, callId: over.callId ?? callId } } as never
 }
 
 async function validate(client: never, cred = credential()) {
-  return fermataServer({ client, escrow }).validate!({ credential: cred, request } as never)
+  return fermataServer({ client, escrow, secretKey: SECRET }).validate!({ credential: cred, request } as never)
 }
 
 describe('fermata server method', () => {
   it('mints a callId per challenge and echoes it on the paid pass', async () => {
-    const server = fermataServer({ client: fakeClient(), escrow })
+    const server = fermataServer({ client: fakeClient(), escrow, secretKey: SECRET })
     const a = (await server.request!({ request: { ...request, callId: undefined } } as never)) as { callId: string }
     const b = (await server.request!({ request: { ...request, callId: undefined } } as never)) as { callId: string }
     expect(a.callId).toMatch(/^0x[0-9a-f]{64}$/)
@@ -66,8 +68,15 @@ describe('fermata server method', () => {
     expect(echoed.callId).toBe(callId)
   })
 
+  it('never echoes the callId of a challenge it did not sign (holds are public on-chain)', async () => {
+    const server = fermataServer({ client: fakeClient(), escrow, secretKey: SECRET })
+    const r = (await server.request!({ request, credential: credential({ forged: true }) } as never)) as { callId: string }
+    expect(r.callId).toMatch(/^0x[0-9a-f]{64}$/)
+    expect(r.callId).not.toBe(callId)
+  })
+
   it('binds route fields but not the callId', () => {
-    const bind = fermataServer({ client: fakeClient(), escrow }).stableBinding!
+    const bind = fermataServer({ client: fakeClient(), escrow, secretKey: SECRET }).stableBinding!
     expect(bind({ ...request, callId: '0x01' } as never)).toEqual(bind({ ...request, callId: '0x02' } as never))
     expect(bind(request as never)).not.toEqual(bind({ ...request, requestHash: keccak256('0x00') } as never))
   })
@@ -98,7 +107,7 @@ describe('fermata server method', () => {
   })
 
   it('claims each callId once', async () => {
-    const server = fermataServer({ client: fakeClient(), escrow })
+    const server = fermataServer({ client: fakeClient(), escrow, secretKey: SECRET })
     const receipt = await server.broadcast!({ credential: credential(), request } as never)
     expect(receipt.reference).toBe(txHash)
     await expect(server.broadcast!({ credential: credential(), request } as never)).rejects.toThrow(/already used/)

@@ -23,7 +23,10 @@ export type ToolConfig = {
   path: string
 }
 
-type McpService = { serviceId: Hex; price: bigint; token: Hex; window: number; summary?: string; tool?: ToolConfig }
+type McpService = { serviceId: Hex; price: bigint; token: Hex; window: number; summary?: string; tool?: ToolConfig; onboarded?: boolean }
+
+/** Names a service may not take: the free tools, and the namespace they live in. */
+export const isReservedToolName = (name: string) => name.startsWith('fermata_')
 
 export type McpDeps = {
   app: Hono
@@ -99,8 +102,18 @@ export function mcpHandler(deps: McpDeps) {
     methods: [deps.fermataHandler as never],
     transport: Transport.mcpSdk(),
   })
-  // Computed per request: services onboarded while running appear at once.
-  const toolMap = () => new Map([...deps.services.values()].map((svc) => [toolFor(svc).name, svc]))
+  // Computed per request: services onboarded while running appear at once. The first service to
+  // claim a name keeps it (configured services load first), so a later listing can never take over
+  // a tool agents already pay, and no service can shadow a free tool.
+  const toolMap = () => {
+    const tools = new Map<string, McpService>()
+    for (const svc of deps.services.values()) {
+      const name = toolFor(svc).name
+      const current = tools.get(name)
+      if (!isReservedToolName(name) && (!current || (current.onboarded && !svc.onboarded))) tools.set(name, svc)
+    }
+    return tools
+  }
   const link = (tx?: string | null) => (tx && deps.explorer ? `${deps.explorer}/tx/${tx}` : tx ?? null)
 
   const listTools = (): Tool[] => [
@@ -110,9 +123,12 @@ export function mcpHandler(deps: McpDeps) {
       return {
         name,
         description: [
-          tool.description ?? svc.summary ?? `Paid call to service ${svc.serviceId}`,
+          // Vendor-written text reaches the agent's model: quote it and say whose words they are.
+          svc.onboarded
+            ? `Third-party API listed through self-serve onboarding. Its description, written by the vendor and not reviewed by Fermata: ${JSON.stringify(tool.description ?? svc.summary ?? '')}.`
+            : (tool.description ?? svc.summary ?? `Paid call to service ${svc.serviceId}`),
           `Costs ${Number(svc.price) / 1e6} (TIP-20 ${svc.token}) per call, paid with the \`fermata\` MPP method: held in escrow on Tempo and released to the vendor only if a TLSNotary proof of its HTTPS answer passes the delivery check; refunded automatically on a proven failure, or after ${svc.window} s if there is no proof.`,
-        ].join(' '),
+        ].filter(Boolean).join(' '),
         inputSchema: {
           type: 'object' as const,
           properties: Object.fromEntries(names.map((n) => [n, { type: 'string', description: n === 'path' ? 'request target, e.g. /v1/quote?symbol=BTC-USD' : n }])),

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { Errors, Method, Store } from 'mppx'
+import { Challenge, Errors, Method, Store } from 'mppx'
 import { isAddressEqual, parseEventLogs, toHex, type Address, type Hex, type PublicClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
 import { HoldStatus, getHold } from './escrow.ts'
@@ -13,13 +13,18 @@ const sameHex = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 export type FermataServerOptions = {
   client: PublicClient
   escrow: Address
+  /** The mppx HMAC secret of the server using this method (the same `secretKey` as `Mppx.create`). */
+  secretKey: string
   /** Replay store; one claim per callId. Defaults to an in-memory store. */
   store?: Store.AtomicStore
 }
 
 /**
  * Server side of the `fermata` method, for a gateway (or a vendor hosting the method itself).
- * - `request` mints a fresh callId per challenge and echoes it on the paid pass;
+ * - `request` mints a fresh callId per challenge and echoes it on the paid pass, but only from a
+ *   challenge this server signed: callIds and hold txs are public on-chain, so echoing any callId
+ *   a caller names would let a stranger obtain a valid challenge for someone else's hold and
+ *   redeem it first;
  * - `stableBinding` binds a credential to this route's serviceId, requestHash, price, token and
  *   escrow, but not to the per-challenge callId;
  * - `validate` accepts only a successful hold transaction on this escrow whose `Held` event has this
@@ -27,10 +32,11 @@ export type FermataServerOptions = {
  * - `broadcast` claims the callId once (replay protection) and returns the receipt.
  * Every rejection is a `VerificationFailedError` (HTTP 402), never a 500.
  */
-export function fermataServer({ client, escrow, store = Store.memory() }: FermataServerOptions) {
+export function fermataServer({ client, escrow, secretKey, store = Store.memory() }: FermataServerOptions) {
   return Method.toServer(fermataMethod, {
     request({ credential, request }) {
-      const echoed = (credential?.challenge.request as { callId?: string } | undefined)?.callId
+      const signedByUs = !!credential && Challenge.verify(credential.challenge, { secretKey })
+      const echoed = signedByUs ? (credential.challenge.request as { callId?: string }).callId : undefined
       return { ...request, callId: echoed ?? toHex(randomBytes(32)) }
     },
     stableBinding: (r) => ({
