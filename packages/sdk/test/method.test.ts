@@ -101,6 +101,24 @@ describe('fermata server method', () => {
     expect(String(err.message)).toMatch(reason)
   })
 
+  it('tolerates an RPC node a few blocks behind the agent: receipt not found yet, hold not visible yet', async () => {
+    let receiptReads = 0, holdReads = 0
+    const base = fakeClient() as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>
+    const lagging = {
+      ...base,
+      getTransactionReceipt: async () => (++receiptReads < 3 ? Promise.reject(new Error('TransactionReceiptNotFoundError')) : base.getTransactionReceipt!()),
+      readContract: async (a: { functionName: string }) => (a.functionName === 'getHold' && ++holdReads < 2 ? { status: 0, deadline: 0n } : base.readContract!(a)),
+    }
+    const v = await fermataServer({ client: lagging as never, escrow, secretKey: SECRET, lagToleranceMs: 3_000 }).validate!({ credential: credential(), request } as never)
+    expect((v.details as { agent: string }).agent.toLowerCase()).toBe(agent)
+    expect([receiptReads, holdReads]).toEqual([3, 2])
+  })
+
+  it('refuses a hold whose settlement window has already closed (nothing is proved for it)', async () => {
+    const late = { ...(fakeClient() as unknown as Record<string, unknown>), getBlock: async () => ({ timestamp: 2_000_000_001n }) }
+    await expect(validate(late as never)).rejects.toThrow(/window closed/)
+  })
+
   it('rejects a credential for another callId or escrow', async () => {
     await expect(validate(fakeClient(), credential({ callId: keccak256('0x09') }))).rejects.toThrow(/callId/)
     await expect(validate(fakeClient(), credential({ escrow: token }))).rejects.toThrow(/another escrow/)

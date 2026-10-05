@@ -8,6 +8,7 @@
     "node": ">=22.21"
   },
   "scripts": {
+    "dev": "bash scripts/demo-stack.sh up --chain anvil",
     "contracts:build": "cd contracts && forge build",
     "contracts:test": "cd contracts && forge test && FOUNDRY_PROFILE=tempo forge test --network tempo",
     "sdk:test": "pnpm -F @fermata/sdk test",
@@ -32,7 +33,8 @@
     "demo:onboard": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/demo/onboard.ts",
     "scores": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/scores.ts",
     "fund": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/fund.ts",
-    "mcp": "tsx apps/mcp/src/index.ts"
+    "mcp": "tsx apps/mcp/src/index.ts",
+    "reverify": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/reverify.ts"
   },
   "devDependencies": {
     "@fermata/sdk": "workspace:*",

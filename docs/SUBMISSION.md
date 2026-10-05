@@ -39,9 +39,10 @@ agent is **refunded**. If there is no record at all, the agent reclaims the hold
 settlement window. Every movement is a TIP-20 transfer whose memo is the call's ID, so each call
 reconciles from on-chain logs alone.
 
-Agents add one line to their `mppx` client (`fermata({ account })`); vendors register a service
-and keep their API unchanged. The gateway also offers plain `tempo` payments, tagged
-`unprotected`, so existing MPP clients keep working. MCP agents such as Claude get the same
+Agents add the `fermata` method to their `mppx` client
+(`fermata({ wallet, client, escrows, trustedVerifiers })`, the last two being their own allow-lists);
+vendors register a service and keep their API unchanged. For services that configure it, the gateway
+also offers plain `tempo` payments, tagged `unprotected`, so existing MPP clients can still pay them. MCP agents such as Claude get the same
 protection as tools: one `claude mcp add` gives Claude pay-on-proof APIs.
 
 Trust model (v1), stated plainly: the escrow trusts one verifier key per service, held by
@@ -74,8 +75,9 @@ The hosted testnet demo lets judges try all three without a wallet.
   refund most of the next hold's storage cost. Tested against the real TIP-20 precompile
   (`forge test --network tempo`).
 - **MPP.** A custom `fermata` payment method for `mppx` (client + server): the 402 challenge
-  carries the escrow, serviceId, callId, requestHash, amount and deadline; the credential is the
-  hold transaction. It is offered next to Tempo's built-in `tempo` method in every challenge.
+  carries the escrow, serviceId, callId, requestHash, amount and currency (the deadline follows
+  from the service's on-chain settlement window); the credential is the hold transaction. Services
+  that configure it also offer Tempo's built-in `tempo` method in the same challenge.
 - **Real vendors.** Besides the mock vendor, Fermata proves the public npm registry. The vendor's
   certificate chains to Mozilla's roots and the call goes over the open internet. A real 200 was
   released and npm's real 404 refunded, about 2 s per proof (`pnpm demo:real`, FACTS §15.6).
@@ -89,6 +91,7 @@ The hosted testnet demo lets judges try all three without a wallet.
   totals report escrow fee and gas separately.
 - **Network:** Tempo Moderato testnet, chain ID 42431, explorer `explore.testnet.tempo.xyz`.
   FermataEscrow on Moderato: [`0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`](https://explore.testnet.tempo.xyz/address/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763)
+  (source [verified, exact match](https://contracts.tempo.xyz/v2/contract/42431/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763) on Tempo's contract verifier)
   ([deploy tx](https://explore.testnet.tempo.xyz/tx/0x96e0a6682f522f6920a3104de329f45a96e804968ac3a3cc98600bcc1b5e174a)).
   `demo:cases --chain moderato` 3/3 PASS — release
   [hold](https://explore.testnet.tempo.xyz/tx/0xb9d627e454bb9496a50d6dac9fe17d4fb2e4f3a4a04d401e183a447f6cdcf84b) /

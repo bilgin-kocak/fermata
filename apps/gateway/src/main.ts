@@ -126,6 +126,10 @@ const gateway = await createGateway({
   onboard: onboardDeps(),
   // onboarded services are persisted here (demo-stack merges them back into the config at start)
   configPath: process.env.ONBOARD_SERVICES_FILE ?? process.env.GATEWAY_CONFIG ?? 'gateway.config.json',
+  verifierFiles: {
+    caPath: process.env.GATEWAY_UPSTREAM_CA,
+    predicateDirs: [new URL('../../attestor/predicates', import.meta.url).pathname, process.env.ONBOARD_PREDICATE_DIR].filter((d): d is string => !!d),
+  },
 })
 self = gateway.app
 // Read the escrow's history now, not on the first dashboard visit.

@@ -1,11 +1,12 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { Credential, Receipt } from 'mppx'
 import { discovery } from 'mppx/hono'
 import { Mppx, tempo } from 'mppx/server'
 import { isAddressEqual, parseEventLogs, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
-import { aggregateScores, fermataEscrowAbi, fermataServer, MODERATO, originHash, requestHash, serviceLabelOf, type EscrowLog } from '@fermata/sdk'
+import { aggregateScores, eventually, fermataEscrowAbi, fermataServer, MODERATO, originHash, predicateHash, requestHash, serviceLabelOf, type EscrowLog } from '@fermata/sdk'
 import type { Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
@@ -37,6 +38,12 @@ export type GatewayDeps = {
   onboard?: Omit<OnboardDeps, 'register'> & { register: (input: RegisterInput, add: (cfg: ServiceConfig) => Promise<void>) => Promise<Registered> }
   /** Where `addService` persists onboarded services (the gateway config file). */
   configPath?: string
+  /**
+   * What a third party needs to re-verify a proof offline (`pnpm reverify`): the vendor CA the mock
+   * vendors' certificates chain to (served at /ca.pem) and the directories holding the predicates
+   * (served at /predicates/:hash; the caller checks the hash against the chain).
+   */
+  verifierFiles?: { caPath?: string; predicateDirs: string[] }
 }
 
 /** JSON-safe copy (bigints as decimal strings). */
@@ -73,15 +80,23 @@ export async function loadServices(deps: GatewayDeps): Promise<Map<string, Servi
   const health = await deps.attestor.health()
   if (!isAddressEqual(health.escrow, deps.chain.escrow)) throw new Error(`attestor serves escrow ${health.escrow}, gateway ${deps.chain.escrow}`)
   if (health.chainId !== deps.chain.chainId) throw new Error(`attestor on chain ${health.chainId}, gateway on ${deps.chain.chainId}`)
-  const out = new Map<string, Service>()
-  for (const cfg of deps.config.services) {
-    try {
-      out.set(cfg.serviceId.toLowerCase(), await checkService(deps, health.signer, cfg))
-    } catch (e) {
-      if (!cfg.onboarded) throw e
-      ;(deps.log ?? console.warn)(`onboarded service ${cfg.serviceId} skipped: ${(e as Error).message}`)
-    }
+  // Checked 8 at a time (each is an RPC read; a hosted demo collects listings), kept in config order:
+  // configured services first, so they keep their MCP tool names.
+  const checked: (Service | undefined)[] = []
+  for (let i = 0; i < deps.config.services.length; i += 8) {
+    const batch = deps.config.services.slice(i, i + 8)
+    checked.push(...(await Promise.all(batch.map(async (cfg) => {
+      try {
+        return await checkService(deps, health.signer, cfg)
+      } catch (e) {
+        if (!cfg.onboarded) throw e
+        ;(deps.log ?? console.warn)(`onboarded service ${cfg.serviceId} skipped: ${(e as Error).message}`)
+        return undefined
+      }
+    }))))
   }
+  const out = new Map<string, Service>()
+  for (const s of checked) if (s) out.set(s.serviceId.toLowerCase(), s)
   return out
 }
 
@@ -175,11 +190,13 @@ export async function createGateway(deps: GatewayDeps) {
   ): Promise<{ response: Response; record: CallRecord }> {
     const holdTx = (credential.payload as { txHash: Hex }).txHash
     const rh = requestHash(svc.serviceId, req.method, req.target, req.body)
-    const hold = await chain.hold(callId)
+    // The credential was just validated; a lagging or failing RPC must not stop the record being
+    // written (without it the sweeper could never claim this hold's timeout refund).
+    const hold = await eventually(() => chain.hold(callId), (h) => h.status !== 0, 6).catch(() => undefined)
     const now = new Date().toISOString()
     let record = await store.put({
-      callId, serviceId: svc.serviceId, method: req.method, target: req.target, requestHash: rh, holdTx, agent: hold.agent,
-      deadline: hold.deadline.toString(), status: 'held', createdAt: now, updatedAt: now,
+      callId, serviceId: svc.serviceId, method: req.method, target: req.target, requestHash: rh, holdTx, agent: hold?.agent,
+      deadline: (hold?.deadline ?? 0n).toString(), status: 'held', createdAt: now, updatedAt: now,
     })
 
     const result = await attestor.attest({
@@ -190,10 +207,10 @@ export async function createGateway(deps: GatewayDeps) {
       // No transcript (vendor silent, TLS failure, notary/prover down) or a failed binding check:
       // never a verdict. Only claimTimeout can end the hold; the sweeper sends it after the window.
       const detail = result.kind === 'rejected' ? `${result.check}: ${result.detail}` : result.detail
-      console.error(`[gateway] call ${callId} has NO VERDICT (${result.kind}: ${detail}); awaiting timeout at ${hold.deadline}`)
+      console.error(`[gateway] call ${callId} has NO VERDICT (${result.kind}: ${detail}); awaiting timeout at ${hold?.deadline ?? '?'}`)
       record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}` })
       const response = Response.json(
-        { error: result.kind, detail, callId, status: 'awaiting-timeout', refundAfter: hold.deadline.toString(), reclaim: 'claimTimeout(callId) on the escrow after refundAfter' },
+        { error: result.kind, detail, callId, status: 'awaiting-timeout', refundAfter: hold?.deadline.toString() ?? null, reclaim: 'claimTimeout(callId) on the escrow after refundAfter' },
         { status: result.kind === 'rejected' ? 502 : 504 },
       )
       return { response, record }
@@ -327,6 +344,26 @@ export async function createGateway(deps: GatewayDeps) {
     if (!bytes) return c.json({ error: 'no presentation for this call' }, 404)
     return new Response(bytes, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${id}.tlsn"` } })
   })
+  // Inputs for an independent offline re-verification. Neither needs trusting: the caller checks a
+  // predicate's sha256 against the service's on-chain predicateHash, and the CA only lets the
+  // verifier accept the mock vendors' certificates (real vendors chain to Mozilla's roots).
+  app.get('/ca.pem', (c) => {
+    const ca = deps.verifierFiles?.caPath
+    return ca && existsSync(ca) ? c.body(readFileSync(ca, 'utf8'), 200, { 'content-type': 'application/x-pem-file' }) : c.json({ error: 'no vendor CA here' }, 404)
+  })
+  app.get('/predicates/:hash', (c) => {
+    const want = c.req.param('hash').toLowerCase().replace(/\.json$/, '')
+    if (!/^0x[0-9a-f]{64}$/.test(want)) return c.json({ error: 'predicate hash: 0x + 64 hex' }, 400)
+    for (const dir of deps.verifierFiles?.predicateDirs ?? []) {
+      if (!existsSync(dir)) continue
+      for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+        const bytes = readFileSync(path.join(dir, name))
+        if (predicateHash(bytes).toLowerCase() === want) return c.body(bytes.toString('utf8'), 200, { 'content-type': 'application/json' })
+      }
+    }
+    return c.json({ error: 'no predicate with this hash' }, 404)
+  })
+
   app.get('/info', (c) =>
     c.json({
       chainId: chain.chainId,
@@ -432,6 +469,8 @@ export async function createGateway(deps: GatewayDeps) {
   async function addService(input: ServiceConfig) {
     const cfg = { ...input, onboarded: true }
     const { signer } = await attestor.health()
+    // Registered a moment ago: a lagging node may not show it yet. Wait for it, then check it once.
+    await eventually(() => deps.chain.service(cfg.serviceId), (s) => !isAddressEqual(s.token, zeroAddress), 6, 1_000).catch(() => undefined)
     services.set(cfg.serviceId.toLowerCase(), await checkService(deps, signer, cfg))
     if (deps.configPath) {
       const { readFileSync, writeFileSync } = await import('node:fs')
@@ -468,7 +507,7 @@ export async function createGateway(deps: GatewayDeps) {
         'Paid API proxy: pay with the `fermata` MPP method (escrowed, released only on a TLSNotary proof of delivery) or `tempo` (unprotected).',
         ...[...services.values()].map((s) => `- ${s.summary ?? 'service'}: ANY /s/${s.serviceId}${s.examplePath ?? '/'}`),
         'GET /services, GET /calls/:callId, GET /proofs/:callId (re-verify offline with `fermata-attest verify --offline`).',
-        'MCP: POST /mcp (Streamable HTTP) — every service is a paid tool (MPP `fermata` method via _meta["org.paymentauth/credential"]); free tools fermata_call, fermata_verify, fermata_reconcile.',
+        'MCP: POST /mcp (Streamable HTTP) — every service is a paid tool (MPP `fermata` method via _meta["org.paymentauth/credential"]); free tools fermata_call, fermata_verify, fermata_reconcile, fermata_vendor_scores.',
       ].join('\n'),
     ),
   )
@@ -502,7 +541,9 @@ export async function createGateway(deps: GatewayDeps) {
       if (FINAL.includes(record.status) || (record.status === 'held' && inFlight.has(record.callId.toLowerCase()))) continue
       const hold = await chain.hold(record.callId)
       if (hold.status !== 1) {
-        await store.update(record.callId, { status: 'closed', error: `finalised on-chain elsewhere (status ${hold.status})` })
+        // Finalised by someone else (anyone may settle a signed verdict or claim a timeout).
+        const status = hold.status === 2 ? 'released' : hold.status === 3 ? 'refunded' : hold.status === 4 ? 'timed-out' : 'closed'
+        await store.update(record.callId, { status, error: `finalised on-chain by another transaction (escrow status ${hold.status})` })
         continue
       }
       if (now <= hold.deadline) {

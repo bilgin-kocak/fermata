@@ -52,7 +52,10 @@ bg() { # log-name command... — start detached, remember the pid
   else nohup "$@" > "$DIR/$name.log" 2>&1 < /dev/null & fi
   echo $! >> "$PIDS"
 }
-wait_port() { for _ in $(seq 150); do (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && return 0; sleep 0.1; done; echo "port $1 did not open (see $DIR)" >&2; return 1; }
+wait_port() { # port [seconds, default 15]
+  for _ in $(seq $(( ${2:-15} * 10 ))); do (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && return 0; sleep 0.1; done
+  echo "port $1 did not open (see $DIR)" >&2; return 1
+}
 
 if [ "$CHAIN" = anvil ]; then
   RPC=http://127.0.0.1:$ANVIL_PORT
@@ -198,7 +201,7 @@ bg gateway env ${PUBLIC_ENV[@]+"${PUBLIC_ENV[@]}"} GATEWAY_CONFIG=$CONFIG GATEWA
   RELAYER_PRIVATE_KEY=$RELAYER_KEY GATEWAY_SECRET_KEY=$SECRET GATEWAY_UPSTREAM_CA=$CA \
   GATEWAY_RESOLVE=vendor.fermata.test:$QUOTE_PORT=127.0.0.1:$QUOTE_PORT \
   "$TSX" apps/gateway/src/main.ts
-wait_port "$GATEWAY_PORT" || { cat "$DIR/gateway.log"; exit 1; }
+wait_port "$GATEWAY_PORT" 180 || { cat "$DIR/gateway.log"; exit 1; }
 
 jq -n --arg chain "$CHAIN" --arg rpc "$RPC" --arg escrow "$ESCROW" --arg gateway "http://127.0.0.1:$GATEWAY_PORT" \
   --arg verifier "$VERIFIER_ADDRESS" --arg explorer "$EXPLORER" --arg attestor "http://127.0.0.1:$ATTESTOR_PORT" \

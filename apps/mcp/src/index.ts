@@ -14,6 +14,8 @@
 //   FERMATA_TRUSTED_VERIFIERS  verifier address(es) the agent trusts (required; never taken from the gateway)
 //   FERMATA_MAX_PRICE          max price per call, base units       (default 100000 = 0.10)
 //   FERMATA_BUDGET             max total held per session           (default 1000000 = 1.00)
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -126,7 +128,10 @@ export async function createBridge(cfg: BridgeConfig) {
   return { server, upstream, account }
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('fermata-mcp')) {
+// Started directly (not imported by a test): compare real paths, so a path with spaces (URL-encoded in
+// import.meta.url) or behind a symlink (macOS /tmp → /private/tmp) still counts.
+const entry = process.argv[1] ? realpathSync(process.argv[1]) : ''
+if (entry === realpathSync(fileURLToPath(import.meta.url)) || entry.endsWith('fermata-mcp')) {
   const cfg = configFromEnv()
   const { server, account } = await createBridge(cfg)
   await server.connect(new StdioServerTransport())

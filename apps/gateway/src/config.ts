@@ -62,5 +62,11 @@ export function loadConfig(path = process.env.GATEWAY_CONFIG ?? 'gateway.config.
   // Scan escrow events from its deploy block, not genesis (Moderato is ~38M blocks deep).
   cfg.fromBlock = Number(process.env.GATEWAY_FROM_BLOCK || file.fromBlock || deployBlockOf(cfg.escrow) || 0)
   if (cfg.services.length === 0) throw new Error('no services configured')
+  for (const s of cfg.services) {
+    // The prover redacts only these headers' values from the presentation (prove.rs).
+    if (s.upstreamAuth && !['authorization', 'cookie', 'proxy-authorization'].includes(s.upstreamAuth.header.toLowerCase())) {
+      throw new Error(`service ${s.serviceId}: upstreamAuth.header ${s.upstreamAuth.header} would appear in every proof; use Authorization, Cookie or Proxy-Authorization`)
+    }
+  }
   return cfg
 }

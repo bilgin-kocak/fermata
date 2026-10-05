@@ -3,14 +3,18 @@
 //! latest block timestamp. Hand-rolled JSON-RPC `eth_call` + ABI decoding (no alloy): both views
 //! return static tuples, so decoding is fixed-offset 32-byte words.
 
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use http_body_util::{BodyExt, Full};
 use hyper::{Request, body::Bytes};
 use hyper_util::rt::TokioIo;
 use serde_json::{Value, json};
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::{
+    net::TcpStream,
+    sync::Mutex,
+    time::{sleep, timeout},
+};
 use tokio_rustls::{
     TlsConnector,
     rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
@@ -164,7 +168,24 @@ impl RpcChain {
         Ok(chain)
     }
 
+    /// One JSON-RPC call, retried: public RPCs drop connections and time out now and then, and a
+    /// transient error here must not turn a proven delivery into "no verdict" (a timeout refund).
     async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        let mut last = anyhow!("RPC {method}: no attempt made");
+        for attempt in 1..=3u64 {
+            match timeout(Duration::from_secs(10), self.call_once(method, params.clone())).await {
+                Ok(Ok(v)) => return Ok(v),
+                Ok(Err(e)) => last = e,
+                Err(_) => last = anyhow!("RPC {method} timed out after 10 s"),
+            }
+            if attempt < 3 {
+                sleep(Duration::from_millis(500 * attempt)).await;
+            }
+        }
+        Err(last)
+    }
+
+    async fn call_once(&self, method: &str, params: Value) -> Result<Value> {
         let uri: hyper::Uri = self
             .rpc
             .parse()
@@ -243,8 +264,19 @@ fn parse_quantity(v: &Value) -> Result<u64> {
 }
 
 impl ChainView for RpcChain {
+    /// A load-balanced RPC can answer from a node a block or two behind the hold the agent just
+    /// mined: a hold that reads as unknown (status 0) is read again for a few seconds before the
+    /// binding check rejects it.
     async fn hold(&self, call_id: [u8; 32]) -> Result<HoldInfo> {
-        decode_hold(&self.eth_call(get_hold_calldata(&call_id)).await?)
+        let mut hold = decode_hold(&self.eth_call(get_hold_calldata(&call_id)).await?)?;
+        for _ in 0..6 {
+            if hold.status != 0 {
+                break;
+            }
+            sleep(Duration::from_secs(1)).await;
+            hold = decode_hold(&self.eth_call(get_hold_calldata(&call_id)).await?)?;
+        }
+        Ok(hold)
     }
 
     async fn service(&self, service_id: [u8; 32]) -> Result<ServiceInfo> {

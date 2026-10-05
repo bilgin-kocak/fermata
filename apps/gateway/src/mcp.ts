@@ -85,7 +85,7 @@ const FREE_TOOLS: Tool[] = [
   },
   {
     name: 'fermata_verify',
-    description: "Free. Re-verifies a call's TLSNotary proof offline (no key, no trust in the gateway) and compares every hash with the chain.",
+    description: "Free. Re-verifies a call's TLSNotary proof with the attestor's offline verifier (no signing key) and compares every hash with the chain. This runs on the gateway; to check without it, download /proofs/<callId> and run `fermata-attest verify --offline` yourself.",
     inputSchema: { type: 'object', properties: { callId: { type: 'string' } }, required: ['callId'] },
   },
   {

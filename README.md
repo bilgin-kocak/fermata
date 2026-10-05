@@ -60,7 +60,7 @@ sequenceDiagram
   Gw->>At: /v1/attest (callId, request)
   At->>Ve: HTTPS over MPC-TLS (notary is blind)
   Ve-->>At: response bytes
-  At->>At: presentation → 8 binding checks → predicate → sign verdict
+  At->>At: presentation → 7 binding checks → predicate → sign verdict
   At-->>Gw: verdict + presentation + response
   Gw->>Es: settle(callId, verdict, sig)
   alt DELIVERED
@@ -76,18 +76,25 @@ sequenceDiagram
 |---|---|
 | [`contracts/src/FermataEscrow.sol`](contracts/src/FermataEscrow.sol) | `hold → settle(verdict) \| claimTimeout`. Per-call holds pulled with a TIP-20 permit; `…WithMemo` transfers with memo = callId; EIP-712 verdicts from one registered verifier per service; service pins the origin, the notary key hash and the predicate hash; 0.5 % fee on release. |
 | [`apps/attestor`](apps/attestor) | `fermata-attest` (Rust, TLSNotary `v0.1.0-alpha.15`): `notary` (the blind MPC-TLS co-signer), `prove`, `verify` (binding checks + predicate + EIP-712 signing), `verify --offline` (anyone, no key), `serve` (HTTP API for the gateway). |
-| [`apps/gateway`](apps/gateway) | The MPP server agents pay. Offers `fermata` (escrowed, pay on proof) and plain `tempo` (direct, tagged `unprotected`) in every challenge; settles, then responds; a sweeper claims expired holds. Serves `/proofs/:callId`, `/calls`, `/events`, `/reconcile/:callId`, `/openapi.json`, `/llms.txt`, the dashboard, and **`/mcp`**: every service as a paid MCP tool. |
-| [`packages/sdk`](packages/sdk) | `fermata({ account })` for `mppx/client`, `fermataServer()` for `mppx/server`, escrow bindings, `reconcile` (movements by memo), `reclaim`. |
+| [`apps/gateway`](apps/gateway) | The MPP server agents pay. Offers `fermata` (escrowed, pay on proof) in every challenge, plus plain `tempo` (direct, tagged `unprotected`) for services that configure it; settles, then responds; a sweeper claims expired holds. Serves `/proofs/:callId`, `/calls`, `/events`, `/reconcile/:callId`, `/openapi.json`, `/llms.txt`, the dashboard, and **`/mcp`**: every service as a paid MCP tool. |
+| [`packages/sdk`](packages/sdk) | `fermata({ wallet, client, escrows, trustedVerifiers })` for `mppx/client`, `fermataServer()` for `mppx/server`, escrow bindings, `reconcile` (movements by memo), `reclaim`. |
 | [`apps/mcp`](apps/mcp) | `fermata-mcp`: the stdio MCP server an agent such as Claude launches. It pays the gateway's MCP tools from the agent's testnet wallet, with your own allow-lists and a spending cap. |
 | [`apps/dashboard`](apps/dashboard) | Live Held/Released/Refunded feed, per-call proof drawer with offline re-verify, reconciliation by memo. Light/dark, works on a phone. |
 | [`apps/vendor`](apps/vendor) | Demo quote API (TLS 1.2) with failure modes: 500, truncated JSON, cut connection, hang, random `CHAOS_RATE`. |
 
-The agent adds one line to its `mppx` client:
+The agent adds the `fermata` method to its `mppx` client. The escrows and verifiers are the agent's
+own allow-lists: it never pays into an escrow or a verifier just because a gateway names it.
 
 ```ts
 import { Mppx } from 'mppx/client'
-import { fermata } from '@fermata/sdk'
-const mppx = Mppx.create({ methods: [fermata({ account })] })
+import { createPublicClient, createWalletClient, http } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { fermata, tempoChain } from '@fermata/sdk'
+
+const chain = tempoChain('https://rpc.moderato.tempo.xyz')
+const wallet = createWalletClient({ account: privateKeyToAccount(AGENT_KEY), chain, transport: http() })
+const client = createPublicClient({ chain, transport: http() })
+const mppx = Mppx.create({ methods: [fermata({ wallet, client, escrows: [ESCROW], trustedVerifiers: [VERIFIER] })] })
 const res = await mppx.fetch('https://gateway.example/s/<serviceId>/v1/quote?symbol=BTC-USD')
 ```
 
@@ -165,15 +172,31 @@ PSE's" became "pluggable to any notary running the same TLSNotary version". Ours
 `fermata-attest notary`; each service pins a notary key hash on-chain, so another notary is used by
 registering a service with its key.
 ² The prover runs inside the attestor (`fermata-attest prove`), which the gateway operator runs;
-both are Fermata's side of the table.
+both are Fermata's side of the table. In the demo the notary is ours too, and a prover and a notary
+run by the same party could collude to produce a presentation for bytes the server never sent.
+Offline re-verification shows the evidence is consistent with the chain; it becomes evidence
+independent of Fermata only when someone else runs the notary.
 
-Re-verify any call yourself, with no key and no trust in the gateway:
+Re-verify any call yourself, offline and with no key. This does not depend on the gateway (it only serves the bytes); it is independent of Fermata only when the notary is (see ²):
 
 ```sh
-curl -o call.tlsn http://127.0.0.1:4300/proofs/<callId>
-fermata-attest verify --offline --presentation call.tlsn --ca apps/vendor/certs/ca.pem \
-  --predicate apps/attestor/predicates --call-id <callId> --service-id <serviceId> \
-  --request-hash <from Held> --origin-hash <from getService> --notary-key-hash <from getService>
+(cd apps/attestor && cargo +1.95.0 build --release)   # once: the offline verifier
+pnpm reverify --call <callId> --gateway https://fermata-production-9378.up.railway.app
+```
+
+`pnpm reverify` takes every expected value from the chain (the Held event, `getService`, the
+Released/Refunded event) and only bytes from the gateway, each checked against the chain before use:
+the presentation (its keccak256 is the on-chain presentationHash), the predicate
+(`GET /predicates/<hash>`; its sha256 is the on-chain predicateHash) and, for the mock vendors, their
+dev CA (`GET /ca.pem`; real vendors must chain to Mozilla's roots). Then `fermata-attest verify
+--offline` checks the notary's signature and the certificate, recomputes requestHash, originHash and
+notaryKeyHash, re-runs the predicate, and must reach the outcome the escrow paid out on. By hand:
+
+```sh
+curl -o call.tlsn $GW/proofs/<callId>; curl -o predicate.json $GW/predicates/<predicateHash>; curl -o ca.pem $GW/ca.pem
+fermata-attest verify --offline --presentation call.tlsn --ca ca.pem --predicate predicate.json \
+  --call-id <callId> --service-id <serviceId> --request-hash <from Held> \
+  --origin-hash <from getService> --notary-key-hash <from getService>
 ```
 
 or press **Re-verify** in the dashboard's proof drawer, which runs the same offline check and puts
@@ -226,7 +249,8 @@ no human input; 226.8 s wall-clock, 2.15 s per call (p50), 1.13 s MPC-TLS provin
 Repeat runs landed at 96/4 and 95/5 (the failures are random), 244–254 s.
 
 **Measured on Tempo Moderato testnet** (2026-10-01, escrow
-[`0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`](https://explore.testnet.tempo.xyz/address/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763)):
+[`0x88A9886B99aC8a93475dEFBda6245161Cd1F0763`](https://explore.testnet.tempo.xyz/address/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763),
+source [verified, exact match](https://contracts.tempo.xyz/v2/contract/42431/0x88A9886B99aC8a93475dEFBda6245161Cd1F0763)):
 `pnpm demo:cases --chain moderato` → **3/3 PASS**; `pnpm demo:load --calls 100 --chain moderato` →
 **96 released, 4 refunded**, 0 errors, 746.3 s wall-clock, 7.5 s per call (p50, dominated by waiting
 for hold and settle to be included), 1.03 s MPC-TLS proving (p50); escrow fees $0.0048, gas paid by
@@ -259,7 +283,7 @@ API didn't deliver":
 
 | | Who decides delivery | Evidence | Refund path | Chain |
 |---|---|---|---|---|
-| x402 / MPP receipt | nobody | a payment receipt only | none | any |
+| x402 / MPP receipt | the service, at its discretion | a payment receipt only | whatever the service decides (MPP: "Refund decisions are up to your service") | any |
 | [Bursar](https://github.com/theweb3wizard/Bursar) (same track) | not in scope: invoicing, budgets and receivables; its contract "never holds funds" | on-chain payment ↔ invoice | none | Tempo |
 | [Recourse](https://github.com/successaje/recourse) | Chainlink CRE enclave, after the buyer disputes with a bond | a seller-published SLA plus the seller's signature over what it sent | escrow pays the dispute winner | Hedera (via CCIP) |
 | [ERC-8183](https://github.com/ethereum/ERCs/blob/master/ERCS/erc-8183.md) Agentic Commerce (draft) | one evaluator per job (the client, a third party, or a contract) | out of scope (an optional reason hash) | evaluator rejects, or anyone refunds after expiry | any EVM |
@@ -300,7 +324,7 @@ Comparison checked against each project's public repository or specification on 
 
 ## Quickstart
 
-Requires Foundry 1.8.3, Node ≥ 22.21, pnpm 10 and (for the attestor) Rust 1.95.0 via rustup.
+Requires Foundry 1.8.3, Node ≥ 22.21, pnpm 10, `jq`, OpenSSL ≥ 1.1.1 (not LibreSSL; for the dev certificates) and (for the attestor) Rust 1.95.0 via rustup. `pnpm dev` starts the whole stack on a local Tempo emulation.
 `corepack enable pnpm` makes `pnpm` use the version pinned in `package.json` (an older global pnpm
 cannot read the lockfile). Tested on Linux and macOS (bash 3.2).
 

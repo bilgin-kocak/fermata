@@ -148,8 +148,9 @@ function TryIt({ status, calls, info, onOpen }: { status: DemoStatus; calls: Cal
             <span>{result.error}</span>
           ) : (
             <>
-              <b>{result.outcome === 'DELIVERED' ? '✓ Released to the vendor' : result.outcome === 'FAILED' ? '↩ Refunded to the agent (proven failure)' : '⏳ No proof: refunded by the contract after the window'}</b>
-              {' · '}vendor answered HTTP {result.status}
+              <b>{result.outcome === 'DELIVERED' ? '✓ Released to the vendor' : result.outcome === 'FAILED' ? '↩ Refunded to the agent (proven failure)' : '⏳ No proof: the contract refunds the agent once the window closes'}</b>
+              {' · '}
+              {result.outcome ? <>vendor answered HTTP {result.status}</> : <>the vendor never answered (gateway HTTP {result.status})</>}
               {result.callId ? <> · call <span className="mono">{short(result.callId)}</span></> : null}
               {' · '}hold <TxLink hash={result.holdTx} info={info} />
               {result.settleTx ? <> · settle <TxLink hash={result.settleTx} info={info} /></> : null}

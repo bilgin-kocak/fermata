@@ -3,6 +3,7 @@ import { Challenge, Errors, Method, Store } from 'mppx'
 import { isAddressEqual, parseEventLogs, toHex, type Address, type Hex, type PublicClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
 import { HoldStatus, getHold } from './escrow.ts'
+import { eventually } from './eventually.ts'
 import { fermataMethod } from './method.ts'
 
 const fail = (reason: string): never => {
@@ -17,6 +18,8 @@ export type FermataServerOptions = {
   secretKey: string
   /** Replay store; one claim per callId. Defaults to an in-memory store. */
   store?: Store.AtomicStore
+  /** How long to look for a hold the RPC does not show yet (a node behind the agent's), in ms. Default 6000. */
+  lagToleranceMs?: number
 }
 
 /**
@@ -32,7 +35,8 @@ export type FermataServerOptions = {
  * - `broadcast` claims the callId once (replay protection) and returns the receipt.
  * Every rejection is a `VerificationFailedError` (HTTP 402), never a 500.
  */
-export function fermataServer({ client, escrow, secretKey, store = Store.memory() }: FermataServerOptions) {
+export function fermataServer({ client, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000 }: FermataServerOptions) {
+  const tries = Math.max(1, Math.round(lagToleranceMs / 500))
   return Method.toServer(fermataMethod, {
     request({ credential, request }) {
       const signedByUs = !!credential && Challenge.verify(credential.challenge, { secretKey })
@@ -53,9 +57,9 @@ export function fermataServer({ client, escrow, secretKey, store = Store.memory(
       if (!sameHex(credential.payload.callId, callId)) fail('credential callId does not match the challenge')
       if (!isAddressEqual(challenged.escrow as Address, escrow)) fail('challenge names another escrow')
 
-      const receipt = await client
-        .getTransactionReceipt({ hash: credential.payload.txHash as Hex })
-        .catch(() => fail(`hold transaction ${credential.payload.txHash} not found`))
+      const receipt = await eventually(() => client.getTransactionReceipt({ hash: credential.payload.txHash as Hex }), undefined, tries).catch(() =>
+        fail(`hold transaction ${credential.payload.txHash} not found`),
+      )
       if (receipt.status !== 'success') fail('hold transaction reverted')
       const held = parseEventLogs({ abi: fermataEscrowAbi, eventName: 'Held', logs: receipt.logs }).find(
         (l) => isAddressEqual(l.address, escrow) && sameHex(l.args.callId, callId),
@@ -65,8 +69,10 @@ export function fermataServer({ client, escrow, secretKey, store = Store.memory(
       if (!sameHex(held.args.requestHash, challenged.requestHash)) fail('hold is for another request')
       if (held.args.amount !== BigInt(challenged.amount)) fail('held amount differs from the price')
 
-      const hold = await getHold(client, escrow, callId as Hex)
+      const hold = await eventually(() => getHold(client, escrow, callId as Hex), (h) => h.status !== HoldStatus.None, tries)
       if (hold.status !== HoldStatus.Held) fail(`hold is no longer open (status ${hold.status})`)
+      const { timestamp } = await client.getBlock()
+      if (timestamp > hold.deadline) fail(`the hold's settlement window closed at ${hold.deadline}: reclaim it with claimTimeout`)
 
       return {
         challenge: credential.challenge,

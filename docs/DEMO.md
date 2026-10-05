@@ -88,9 +88,9 @@ delivered.*
 > released and five refunded — every failure proven, and paid back by the contract. On Tempo's
 > Moderato testnet the same hundred calls gave ninety-six and four.
 >
-> Open any call. This is what the vendor's server actually sent, with the API key redacted. The
-> proof is signed by the notary, and anyone can download it and re-verify it offline, with no
-> key and no trust in us. Every recomputed hash matches the one on-chain. And this one — a real
+> Open any call. This is what the vendor's server actually sent; a credential, if the API had one,
+> would be redacted. The proof is signed by the notary, and anyone can download it and re-verify it
+> offline, with no key. Every recomputed hash matches the one on-chain. And this one — a real
 > 500, proven, refunded.
 
 **Optional 10 s insert (from `pnpm demo:real`):** a terminal shot of npm's real 404 being refunded.

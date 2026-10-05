@@ -92,6 +92,7 @@ class FakeChain implements GatewayChain {
         return { status: 'success', transactionHash: hash, blockNumber: 1n, logs: [{ address: escrow, topics, data, blockNumber: 1n, logIndex: 0, transactionHash: hash, transactionIndex: 0, blockHash: hash, removed: false }] }
       },
       readContract: async ({ args }: { args: [Hex] }) => this.hold(args[0]),
+      getBlock: async () => ({ timestamp: this.time }),
     } as never
   }
 }
@@ -262,6 +263,15 @@ describe('gateway', () => {
     chain.time = 1_121n
     expect(await gw.sweep()).toEqual([callId])
     expect((await store.get(callId))?.status).toBe('timed-out')
+  })
+
+  it('a call finalised by someone else records the on-chain outcome, not a bare "closed"', async () => {
+    const callId = keccak256(toHex('elsewhere')) as Hex
+    const now = new Date().toISOString()
+    await store.put({ callId, serviceId: sid, method: 'GET', target: '/v1/quote', requestHash: `0x${'33'.repeat(32)}`, holdTx: keccak256(toHex('h2')), agent, deadline: '1120', status: 'awaiting-timeout', createdAt: now, updatedAt: now })
+    chain.holds.set(callId.toLowerCase(), { status: 4, deadline: 1_120n, agent, serviceId: sid, requestHash: `0x${'33'.repeat(32)}` as Hex }) // the agent reclaimed it itself
+    await gw.sweep()
+    expect(await store.get(callId)).toMatchObject({ status: 'timed-out', error: expect.stringContaining('another transaction') })
   })
 
   it('turns new payers away (503, nothing charged) while proving is saturated', async () => {
