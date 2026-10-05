@@ -304,7 +304,9 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
   - `demo:cases` waits for receipts and retries reconciliation on a lagging RPC node.
   - README: `corepack enable pnpm`, because an older global pnpm cannot read the lockfile.
   - `probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`: PASS.
-- [ ] Deploy to a VM (Bilgin, `deploy/README.md`), then add the live URL to README, SUBMISSION and the deck.
+- [x] Hosted on Railway (2026-10-05): https://fermata-production-9378.up.railway.app/dashboard/. Own fresh testnet keys, volume for state; smoke 7/7, a
+  100-call run through it 96/4 with 0 errors, demo:mcp 6/6. Live URL in README and SUBMISSION.
+- [ ] Add the live URL to the deck (Bilgin).
 - [ ] Pitch video, recorded by Bilgin from the deck's speaker notes. The rules (secondary source)
   ask for a pitch video separate from the demo video.
 

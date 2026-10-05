@@ -232,6 +232,10 @@ Repeat runs landed at 96/4 and 95/5 (the failures are random), 244–254 s.
 for hold and settle to be included), 1.03 s MPC-TLS proving (p50); escrow fees $0.0048, gas paid by
 the agent $0.0341 in pathUSD.
 
+**Through the [live demo](https://fermata-production-9378.up.railway.app/dashboard/)** (Railway, 2026-10-05): the same 100-call run →
+**96 released, 4 refunded**, 0 errors, 544.3 s wall-clock, 5.4 s per call (p50), 0.56 s MPC-TLS
+proving (p50); `pnpm demo:mcp` → 6/6; `deploy/smoke.sh` → 7/7. Its Vendors tab shows the result.
+
 | Case (Moderato) | Hold | Settle / refund |
 |---|---|---|
 | 1 release (vendor delivers) | [tx](https://explore.testnet.tempo.xyz/tx/0xb9d627e454bb9496a50d6dac9fe17d4fb2e4f3a4a04d401e183a447f6cdcf84b) | [tx](https://explore.testnet.tempo.xyz/tx/0xd480381bb6f5ba8135065bdf228d6fd863069f942c61f4c092d27dd02d3b4463) |
