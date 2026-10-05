@@ -40,6 +40,17 @@ export type FermataClientOptions = {
  * The challenge's requestHash is not re-derived here: if a gateway named another request, no proof
  * could ever match it, and the hold can only end in a timeout refund.
  */
+// One hold at a time per agent account: each hold signs a permit with the token's current nonce and
+// sends a transaction with the account's next nonce, so two concurrent payments would collide on both.
+const holdQueues = new Map<string, Promise<unknown>>()
+function oneAtATime<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const run = (holdQueues.get(key) ?? Promise.resolve()).then(task, task)
+  const settled = run.then(() => undefined, () => undefined)
+  holdQueues.set(key, settled)
+  void settled.then(() => holdQueues.get(key) === settled && holdQueues.delete(key))
+  return run
+}
+
 export function fermata(opts: FermataClientOptions) {
   return Method.toClient(fermataMethod, {
     async createCredential({ challenge }) {
@@ -60,16 +71,19 @@ export function fermata(opts: FermataClientOptions) {
       if (amount !== service.pricePerCall) throw new Error(`challenged amount ${amount} ≠ registered price ${service.pricePerCall}`)
 
       const account = opts.wallet.account as LocalAccount
-      const deadline = (await opts.client.getBlock()).timestamp + BigInt(opts.permitTtl ?? 600)
-      const { v, r: sr, s } = await signPermit(opts.client, service.token, account, escrow, amount, deadline)
-      const txHash = await opts.wallet.writeContract({
-        address: escrow,
-        abi: fermataEscrowAbi,
-        functionName: 'hold',
-        args: [callId, r.serviceId as Hex, r.requestHash as Hex, deadline, v, sr, s],
+      const txHash = await oneAtATime(account.address.toLowerCase(), async () => {
+        const deadline = (await opts.client.getBlock()).timestamp + BigInt(opts.permitTtl ?? 600)
+        const { v, r: sr, s } = await signPermit(opts.client, service.token, account, escrow, amount, deadline)
+        const hash = await opts.wallet.writeContract({
+          address: escrow,
+          abi: fermataEscrowAbi,
+          functionName: 'hold',
+          args: [callId, r.serviceId as Hex, r.requestHash as Hex, deadline, v, sr, s],
+        })
+        const receipt = await opts.client.waitForTransactionReceipt({ hash })
+        if (receipt.status !== 'success') throw new Error(`hold transaction reverted: ${hash}`)
+        return hash
       })
-      const receipt = await opts.client.waitForTransactionReceipt({ hash: txHash })
-      if (receipt.status !== 'success') throw new Error(`hold transaction reverted: ${txHash}`)
       opts.onHold?.({ callId, serviceId: r.serviceId as Hex, txHash, amount })
       return Credential.serialize({ challenge, payload: { type: 'hold', txHash, callId } })
     },

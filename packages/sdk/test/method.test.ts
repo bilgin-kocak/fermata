@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Challenge, Errors } from 'mppx'
-import { encodeAbiParameters, encodeEventTopics, keccak256, pad, toHex, type Address, type Hex } from 'viem'
+import { domainSeparator, encodeAbiParameters, encodeEventTopics, keccak256, pad, toHex, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { fermataEscrowAbi } from '../src/abi.ts'
 import { fermata } from '../src/client.ts'
@@ -148,5 +148,27 @@ describe('fermata client method', () => {
     ['a price mismatch', fakeClient(), challenge({ amount: '20000' }), /registered price/],
   ])('refuses %s before any money moves', async (_, client, c, reason) => {
     await expect(create(client, c)).rejects.toThrow(reason)
+  })
+
+  it('pays one call at a time per agent: concurrent payments never share a permit or transaction nonce', async () => {
+    let nonce = 0n, inFlight = 0, maxInFlight = 0
+    const used: bigint[] = []
+    const base = fakeClient() as unknown as Record<string, (a?: unknown) => Promise<unknown>>
+    const domain = { name: 'pathUSD', version: '1', chainId: 42431, verifyingContract: token } as const
+    const client = {
+      ...base,
+      readContract: async (a: { functionName: string }) =>
+        a.functionName === 'name' ? 'pathUSD' : a.functionName === 'nonces' ? nonce : a.functionName === 'DOMAIN_SEPARATOR' ? domainSeparator({ domain }) : base.readContract!(a),
+      waitForTransactionReceipt: async () => (await new Promise((r) => setTimeout(r, 15)), nonce++, inFlight--, { status: 'success' }),
+    }
+    const payer = {
+      account: privateKeyToAccount(pad('0x01', { size: 32 })),
+      writeContract: async () => (inFlight++, (maxInFlight = Math.max(maxInFlight, inFlight)), used.push(nonce), keccak256(toHex(`tx${used.length}`))),
+    }
+    const m = fermata({ wallet: payer as never, client: client as never, trustedVerifiers: [verifier], escrows: [escrow] })
+    const c = (id: string) => Challenge.from({ id: 'x', realm: 'test', method: 'fermata', intent: 'charge', request: { ...request, callId: keccak256(toHex(id)) } } as never)
+    await Promise.all(['a', 'b', 'c'].map((id) => m.createCredential({ challenge: c(id) } as never)))
+    expect(maxInFlight).toBe(1)
+    expect(used).toEqual([0n, 1n, 2n]) // each permit signed after the previous hold was mined
   })
 })

@@ -83,9 +83,14 @@ function onboardDeps() {
   const predicateDir = required('ONBOARD_PREDICATE_DIR') // also passed to the attestor as a --predicate path
   mkdirSync(predicateDir, { recursive: true })
   const operator = createWalletClient({ account: privateKeyToAccount((process.env.ONBOARD_OPERATOR_PRIVATE_KEY || required('RELAYER_PRIVATE_KEY')) as Hex), chain: chainDef, transport: http(config.rpc) })
+  const labelTaken = async (label: string) => {
+    const s = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [makeServiceId(operator.account.address, label)] })
+    return s.token !== '0x0000000000000000000000000000000000000000'
+  }
   return {
     trustProxy: Number(process.env.GATEWAY_TRUST_PROXY ?? 0),
     clientIpHeader: process.env.GATEWAY_CLIENT_IP_HEADER || undefined,
+    labelTaken,
     probe: (t: Parameters<typeof probeVendor>[0]) => probeVendor(t, { proxy: process.env.FERMATA_UPSTREAM_PROXY || undefined }),
     register: async (
       input: { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string },

@@ -84,6 +84,11 @@ export type Sample = {
 
 const TLSN_CIPHERS = 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256'
 const MAX_BYTES = 16_000
+/** The prover's receive budget for the whole response, head included (fermata-attest --max-recv). */
+const PROVER_RECV_BYTES = 16_384
+/** What the prover sends (apps/attestor/src/prove.rs): the check must ask exactly what a proof will. */
+const PROVER_USER_AGENT = 'fermata-attest/0.1 (+https://github.com/bilgin-kocak/fermata)'
+const PROBE_CALL_ID = `0x${'00'.repeat(32)}`
 
 /** HTTP CONNECT tunnel (when the gateway itself sits behind an egress proxy). */
 async function tunnel(proxyUrl: string, host: string): Promise<Socket> {
@@ -137,13 +142,17 @@ export async function probeVendor(t: SafeTarget, opts: { proxy?: string; timeout
     const key = socket.getEphemeralKeyInfo() as { name?: string } | null
     const cert = socket.getPeerCertificate()
     const tls = { protocol: socket.getProtocol(), cipher: socket.getCipher().standardName ?? socket.getCipher().name, group: key?.name ?? null, issuer: [cert?.issuer?.O ?? cert?.issuer?.CN ?? null].flat()[0] ?? null }
-    socket.write(`GET ${t.target} HTTP/1.1\r\nHost: ${t.host}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nUser-Agent: fermata-onboarding/0.1\r\nConnection: close\r\n\r\n`)
+    // The request a proved call makes: the prover's fixed headers plus the Accept agents send.
+    socket.write(
+      `GET ${t.target} HTTP/1.1\r\nHost: ${t.host}\r\nX-Fermata-Call: ${PROBE_CALL_ID}\r\nAccept-Encoding: identity\r\n` +
+        `User-Agent: ${PROVER_USER_AGENT}\r\nConnection: close\r\nAccept: application/json\r\n\r\n`,
+    )
     const chunks: Buffer[] = []
     let total = 0
     await new Promise<void>((ok, fail) => {
       socket.on('data', (d: Buffer) => {
         total += d.length
-        if (total > MAX_BYTES + 8192) socket.destroy(new Error(`the response is larger than the prover's ${MAX_BYTES / 1000} KB budget`))
+        if (total > PROVER_RECV_BYTES) socket.destroy(new Error(`the response is larger than the prover's ${PROVER_RECV_BYTES} byte budget (headers included)`))
         else chunks.push(d)
       })
       socket.once('end', ok)
@@ -151,6 +160,10 @@ export async function probeVendor(t: SafeTarget, opts: { proxy?: string; timeout
       socket.once('error', fail)
     })
     const buf = Buffer.concat(chunks)
+    // Headers vary a little between answers (dates, request ids): leave room so a proof still fits.
+    if (buf.length > PROVER_RECV_BYTES - 512) {
+      throw new Error(`the response (${buf.length} bytes with headers) is too close to the prover's ${PROVER_RECV_BYTES} byte budget`)
+    }
     const sep = buf.indexOf('\r\n\r\n')
     if (sep < 0) throw new Error('no HTTP/1.1 response')
     const head = buf.subarray(0, sep).toString('latin1').split('\r\n')
@@ -259,6 +272,8 @@ export type OnboardDeps = {
   register: (input: RegisterInput) => Promise<Registered>
   /** True when a served service already exposes this MCP tool name. */
   toolTaken?: (name: string) => boolean
+  /** True when this label is already registered on-chain (checked before any quota is spent). */
+  labelTaken?: (label: string) => Promise<boolean>
   /** Proxies appending to X-Forwarded-For in front of the gateway (see clientIp). */
   trustProxy?: boolean | number
   clientIpHeader?: string
@@ -323,14 +338,20 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
       } catch (e) {
         return bad(c, e, 400)
       }
-      const wait = regsPerIp.take(ip(c))
-      if (wait) return c.json({ error: 'registration limit for this address reached; try tomorrow', retryAfterMs: wait }, 429)
-      if (!regs.take()) return c.json({ error: 'today’s registration budget is used up' }, 429)
+      // Re-checking the vendor costs a probe, not a registration: a listing that fails a check
+      // (or names a taken label) leaves the visitor's registrations untouched.
+      const visitor = ip(c)
+      const probeWait = probes.take(visitor)
+      if (probeWait) return c.json({ error: 'too many checks from this address; try again later', retryAfterMs: probeWait }, 429)
       try {
         // The URL must still answer, and its answer must pass the predicate being registered.
         const sample = await deps.probe(t)
         const failures = checkSample(JSON.parse(new TextDecoder().decode(predicate)) as Predicate, sample)
         if (failures.length) return c.json({ error: `the vendor's current answer would fail this predicate: ${failures.join('; ')}` }, 422)
+        if (await deps.labelTaken?.(label)) return c.json({ error: `label "${label}" is taken; pick another` }, 409)
+        const wait = regsPerIp.take(visitor)
+        if (wait) return c.json({ error: 'registration limit for this address reached; try tomorrow', retryAfterMs: wait }, 429)
+        if (!regs.take()) return c.json({ error: 'today’s registration budget is used up' }, 429)
         const summary = String(b.summary ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').trim().slice(0, 200) || `${t.host} (onboarded)`
         return c.json({ ok: true, ...(await deps.register({ origin: t.origin, examplePath: t.target, label, payout: b.payout as Address, price, predicate, summary, toolName })) })
       } catch (e) {

@@ -77,19 +77,17 @@ await run('3 timeout refund (vendor never answers)', async (r) => {
   r.callId = rc.callId; r.outcome = 'TIMEOUT'
   check(r, res.status === 504 && rc.outcome === 'AWAITING_TIMEOUT', `no transcript → no verdict (HTTP ${res.status})`)
   let call = await gw<{ status: string; deadline: string; timeoutTx?: Hex }>(`/calls/${rc.callId}`)
-  if (stack.chain === 'anvil') {
-    const now = (await client.getBlock()).timestamp
-    await client.request({ method: 'evm_increaseTime' as never, params: [Number(BigInt(call.deadline) - now) + 1] as never })
-    await client.request({ method: 'evm_mine' as never, params: [] as never })
-  } else {
-    process.stdout.write('      waiting for the settlement window')
-  }
+  // Wait out the window in real time. On Anvil, mine a block every 2 s (at wall-clock time) so chain
+  // time moves; warping it ahead instead would put later TLS sessions "before" their holds, and the
+  // attestor's session-time check would fail every call on this stack from then on.
+  process.stdout.write('      waiting for the settlement window')
   for (let i = 0; i < 120 && call.status !== 'timed-out'; i++) {
     await sleep(2_000)
-    if (stack.chain !== 'anvil') process.stdout.write('.')
+    if (stack.chain === 'anvil') await client.request({ method: 'evm_mine' as never, params: [] as never })
+    process.stdout.write('.')
     call = await gw(`/calls/${rc.callId}`)
   }
-  if (stack.chain !== 'anvil') process.stdout.write('\n')
+  process.stdout.write('\n')
   check(r, call.status === 'timed-out', `gateway sweeper sent claimTimeout (${call.status})`)
   if (call.timeoutTx) {
     const logs = (await client.waitForTransactionReceipt({ hash: call.timeoutTx })).logs

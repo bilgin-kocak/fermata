@@ -73,9 +73,63 @@ pub fn parse_response(bytes: &[u8]) -> Result<RawResponse> {
             )
         })
         .collect::<Vec<_>>();
+    let raw_body = &bytes[head_len..];
+    let chunked = headers
+        .iter()
+        .any(|(k, v)| k == "transfer-encoding" && v.to_ascii_lowercase().contains("chunked"));
     Ok(RawResponse {
         status: res.code.context("no status code")?,
         headers,
-        body: bytes[head_len..].to_vec(),
+        body: if chunked {
+            decode_chunked(raw_body)
+        } else {
+            raw_body.to_vec()
+        },
     })
+}
+
+/// Decodes a `Transfer-Encoding: chunked` body (chunk extensions and trailers ignored). A body cut
+/// short (the server closed mid-chunk) decodes to the bytes that arrived; the predicate judges them.
+pub fn decode_chunked(mut b: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    while let Some(eol) = b.windows(2).position(|w| w == b"\r\n") {
+        let line = std::str::from_utf8(&b[..eol]).unwrap_or("");
+        let Ok(size) = usize::from_str_radix(line.split(';').next().unwrap_or("").trim(), 16) else {
+            break;
+        };
+        b = &b[eol + 2..];
+        if size == 0 {
+            break;
+        }
+        let take = size.min(b.len());
+        out.extend_from_slice(&b[..take]);
+        b = &b[take..];
+        if take < size || !b.starts_with(b"\r\n") {
+            break;
+        }
+        b = &b[2..];
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunked_bodies_are_decoded() {
+        let raw = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n7;ext=1\r\n{\"a\":1,\r\n6\r\n\"b\":2}\r\n0\r\nX-Trailer: t\r\n\r\n";
+        let res = parse_response(raw).unwrap();
+        assert_eq!(res.status, 200);
+        assert_eq!(res.body, b"{\"a\":1,\"b\":2}");
+    }
+
+    #[test]
+    fn plain_and_truncated_bodies() {
+        let plain = parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap();
+        assert_eq!(plain.body, b"{}");
+        // cut mid-chunk: what arrived, no framing
+        assert_eq!(decode_chunked(b"a\r\n0123"), b"0123");
+        assert_eq!(decode_chunked(b"not hex\r\n"), b"");
+    }
 }

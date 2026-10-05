@@ -45,13 +45,18 @@ use crate::hashes::{Origin, hex0x};
 /// Request headers whose values are never revealed in a presentation.
 pub const REDACTED_HEADERS: [&str; 3] = ["authorization", "cookie", "proxy-authorization"];
 /// Headers the prover sets itself; caller-supplied copies are dropped.
-const RESERVED_HEADERS: [&str; 5] = [
+const RESERVED_HEADERS: [&str; 6] = [
     "host",
     "x-fermata-call",
     "connection",
     "content-length",
     "accept-encoding",
+    "user-agent",
 ];
+
+/// Sent on every proved request (some APIs refuse requests without one). The gateway's onboarding
+/// check sends the same, so an API that passes the check answers the prover the same way.
+pub const USER_AGENT: &str = "fermata-attest/0.1 (+https://github.com/bilgin-kocak/fermata)";
 
 #[derive(Clone, Debug)]
 pub struct ProveRequest {
@@ -284,6 +289,7 @@ pub async fn prove_once(req: &ProveRequest) -> Result<ProveOutput> {
         .header("host", req.origin.host_header())
         .header("x-fermata-call", hex0x(&req.call_id))
         .header("accept-encoding", "identity")
+        .header("user-agent", USER_AGENT)
         .header("connection", "close");
     for (k, v) in &req.headers {
         if !RESERVED_HEADERS.iter().any(|r| k.eq_ignore_ascii_case(r)) {

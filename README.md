@@ -146,12 +146,19 @@ reliable vendors before paying. Two limits are stated with the scores:
 
 **List your API.** A vendor pastes a URL. The gateway:
 1. checks it is a public HTTPS host (never a private or internal address);
-2. probes TLSNotary's TLS profile and takes a sample answer;
+2. probes TLSNotary's TLS profile and takes a sample answer, sending exactly the request a proof will
+   send (same headers, same 16 KB limit; chunked answers are fine);
 3. drafts the delivery rule from that sample, for the vendor to review;
 4. registers the service on-chain;
 5. serves it at once: an HTTP endpoint, an MCP tool, a scoreboard row.
 
 `pnpm demo:onboard` runs this end to end against the real npm registry (7/7).
+
+**Listings are not ownership-checked in this testnet demo.** Anyone can list any public HTTPS API
+under their own payout address, so a listing says nothing about who runs the API. Agents choose
+which services to pay (and the scoreboard only ranks what was proven); a production version would
+require proof of control of the origin, such as a DNS TXT record or a `/.well-known` file, before
+registering a payout for it.
 
 ![List your API: compatibility check and the drafted delivery rule](docs/img/public-onboard.png)
 

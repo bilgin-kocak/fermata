@@ -131,6 +131,21 @@ describe('onboarding routes', () => {
     expect(s.registered).toEqual([])
     expect((await s.post('/onboard/register', good)).status).toBe(200) // the one daily registration is still there
   })
+  it('a listing that fails a check spends no registration quota', async () => {
+    let answer = sample({ status: 503 })
+    const s = setup({ probe: async () => answer, perIpRegistrationsPerDay: 1 })
+    expect((await s.post('/onboard/register', good)).status).toBe(422) // the vendor's answer fails the rule
+    answer = sample()
+    expect((await s.post('/onboard/register', good)).status).toBe(200) // the one registration was still there
+  })
+  it('a taken label is refused before any quota is spent', async () => {
+    const s = setup({ labelTaken: async (l) => l === 'npm-tags2', perIpRegistrationsPerDay: 1 })
+    const taken = await s.post('/onboard/register', good)
+    expect(taken.status).toBe(409)
+    expect(((await taken.json()) as { error: string }).error).toContain('label')
+    expect((await s.post('/onboard/register', { ...good, label: 'npm-free' })).status).toBe(200)
+  })
+
   it('two simultaneous listings cannot claim the same tool name (even behind a slow DNS lookup)', async () => {
     const slowDns = async (h: string) => (await new Promise((ok) => setTimeout(ok, 20)), h === 'registry.npmjs.org' ? ['104.16.0.34'] : [])
     const s = setup({ resolve: slowDns })
