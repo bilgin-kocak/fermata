@@ -7,6 +7,32 @@ This is a public, always-on Fermata on **Tempo Moderato testnet**. Visitors get:
 
 Only the gateway is exposed, behind Caddy with automatic HTTPS. The notary, attestor and mock vendors listen on 127.0.0.1.
 
+## Railway (what the live demo runs on)
+
+The repo's `Dockerfile` builds the whole stack into one container (attestor built in a Rust stage;
+dashboard and dev certificates built in the image), and `railway.json` sets the health check (`/info`)
+and the restart policy. The container runs `scripts/demo-stack.sh run --chain moderato` in public mode.
+
+```sh
+railway init -n fermata                      # new project, linked to this directory
+railway add --service fermata
+railway domain --service fermata --port 8080 # → https://<name>.up.railway.app
+railway volume add --mount-path /data        # calls, proofs, onboarded vendors survive deploys
+# keys: a fresh set for the hosted demo (never your laptop's relayer: the two would race for nonces),
+# funded with `cast rpc tempo_fundAddress <address>`: VERIFIER_, RELAYER_, VENDOR_, NOTARY_ and
+# DEMO_AGENT_PRIVATE_KEY, plus GATEWAY_SECRET_KEY (32 random bytes)
+railway variables --service fermata --skip-deploys --set PORT=8080 --set GATEWAY_REALM=<name>.up.railway.app --set …
+railway up --ci --service fermata             # upload, build (~5 min), deploy
+bash deploy/smoke.sh https://<name>.up.railway.app
+```
+
+Behind Railway's edge the visitor's address is the second `X-Forwarded-For` entry from the right (the
+edge appends the visitor, then its own hop), hence `GATEWAY_TRUST_PROXY=2` in the image; entries
+further left come from the visitor and are ignored, so nobody dodges the per-visitor limits by
+sending their own header. Each demo call logs the visitor and the raw headers, to check this.
+
+## A VM instead
+
 ## What you need
 
 - **A VM:** Ubuntu 24.04, 4 vCPU / 8 GB, ports 80 and 443 open. Any provider works (Hetzner CX32, DigitalOcean, AWS t3.xlarge…).

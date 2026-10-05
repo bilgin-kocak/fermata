@@ -146,12 +146,33 @@ export async function createGateway(deps: GatewayDeps) {
    * Shared by the HTTP route and the MCP endpoint. Returns the proved vendor response (or the
    * no-verdict error) and the call record.
    */
+  // Calls this process is proving right now. A 'held' record outside this set was interrupted (a
+  // restart mid-proof): the sweeper treats it like awaiting-timeout, so the agent is still refunded.
+  const inFlight = new Set<string>()
+  // Proofs are serialised in the attestor: past this many in flight, new payers get 503 before paying.
+  const maxInFlight = Number(deps.env?.GATEWAY_MAX_IN_FLIGHT ?? process.env.GATEWAY_MAX_IN_FLIGHT ?? 4)
+  const saturated = () => inFlight.size >= maxInFlight
+
   async function fulfil(
     svc: Service,
     req: { method: string; target: string; headers: Headers; body: Uint8Array },
     credential: { challenge: { request: unknown }; payload: unknown },
   ): Promise<{ response: Response; record: CallRecord }> {
     const callId = (credential.challenge.request as { callId: Hex }).callId
+    inFlight.add(callId.toLowerCase())
+    try {
+      return await prove(svc, req, credential, callId)
+    } finally {
+      inFlight.delete(callId.toLowerCase())
+    }
+  }
+
+  async function prove(
+    svc: Service,
+    req: { method: string; target: string; headers: Headers; body: Uint8Array },
+    credential: { challenge: { request: unknown }; payload: unknown },
+    callId: Hex,
+  ): Promise<{ response: Response; record: CallRecord }> {
     const holdTx = (credential.payload as { txHash: Hex }).txHash
     const rh = requestHash(svc.serviceId, req.method, req.target, req.body)
     const hold = await chain.hold(callId)
@@ -210,6 +231,11 @@ export async function createGateway(deps: GatewayDeps) {
     const body = new Uint8Array(await c.req.raw.clone().arrayBuffer())
     const rh = requestHash(svc.serviceId, method, target, body)
 
+    // Admission control: refuse new payers (no credential yet) while proving is saturated, so no one
+    // holds money for a call that would only wait out its window. Paid credentials are always served.
+    if (saturated() && !/^payment /i.test(c.req.header('authorization') ?? '')) {
+      return c.json({ error: 'busy: other calls are being proved; retry in a few seconds' }, 503, { 'Retry-After': '5' })
+    }
     const r = await offers(svc, rh)(c.req.raw)
     if (r.status === 402) return r.challenge
 
@@ -258,9 +284,13 @@ export async function createGateway(deps: GatewayDeps) {
     })()
     await logCache.pending
   }
+  // Only services whose verdicts this gateway's attestor signs are ranked: a service registered with
+  // its own key as verifier could "release" calls with no proof at all.
+  const { signer: attestorSigner } = await attestor.health()
   app.get('/scores', async (c) => {
     await refreshLogs()
-    const scores = aggregateScores(logCache.logs).map((s) => {
+    const all = aggregateScores(logCache.logs)
+    const scores = all.filter((s) => s.verifier && isAddressEqual(s.verifier, attestorSigner)).map((s) => {
       const svc = services.get(s.serviceId.toLowerCase())
       return {
         ...s,
@@ -273,9 +303,15 @@ export async function createGateway(deps: GatewayDeps) {
       }
     })
     return c.json(plain({
-      escrow: chain.escrow, chainId: chain.chainId, scannedTo: logCache.next - 1n, method: 'Wilson 95 % lower bound of released / settled, from ServiceRegistered/Held/Released/Refunded events only',
-      recompute: 'pnpm scores --chain <anvil|moderato> --escrow <escrow>',
-      caveats: ['Only calls paid through Fermata count.', 'A vendor could pay itself to inflate its score; distinct agents are shown for that reason.'],
+      escrow: chain.escrow, chainId: chain.chainId, scannedTo: logCache.next - 1n, verifier: attestorSigner,
+      method: 'Wilson 95 % lower bound of released / (released + proven failures), from ServiceRegistered/Held/Released/Refunded events only; timeouts are shown but not ranked',
+      recompute: `pnpm scores --chain <anvil|moderato> --escrow ${chain.escrow} --verifier ${attestorSigner}`,
+      caveats: [
+        'Only calls paid through Fermata count.',
+        `Only services settled by this attestor (${attestorSigner}) are ranked; ${all.length - scores.length} other service(s) on this escrow are not.`,
+        'Timeouts are shown but not ranked: anyone can hold a call and never present it.',
+        'A vendor could pay itself to inflate its score; distinct agents are shown for that reason.',
+      ],
       scores,
     }))
   })
@@ -421,7 +457,7 @@ export async function createGateway(deps: GatewayDeps) {
   const mcp = mcpHandler({
     app, services, escrow: chain.escrow, chainId: chain.chainId, secretKey: deps.secretKey, realm: deps.config.realm,
     explorer: deps.explorer === undefined ? (deps.config.rpc.includes('moderato') ? MODERATO.explorer : null) : deps.explorer,
-    fermataHandler, fulfil: fulfil as never,
+    fermataHandler, fulfil: fulfil as never, saturated,
   })
   app.all('/mcp', (c) => mcp(c.req.raw))
 
@@ -463,7 +499,7 @@ export async function createGateway(deps: GatewayDeps) {
     const now = await chain.now()
     const done: string[] = []
     for (const record of await store.list()) {
-      if (FINAL.includes(record.status) || record.status === 'held') continue
+      if (FINAL.includes(record.status) || (record.status === 'held' && inFlight.has(record.callId.toLowerCase()))) continue
       const hold = await chain.hold(record.callId)
       if (hold.status !== 1) {
         await store.update(record.callId, { status: 'closed', error: `finalised on-chain elsewhere (status ${hold.status})` })

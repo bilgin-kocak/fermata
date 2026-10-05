@@ -259,7 +259,9 @@ export type OnboardDeps = {
   register: (input: RegisterInput) => Promise<Registered>
   /** True when a served service already exposes this MCP tool name. */
   toolTaken?: (name: string) => boolean
-  trustProxy?: boolean
+  /** Proxies appending to X-Forwarded-For in front of the gateway (see clientIp). */
+  trustProxy?: boolean | number
+  clientIpHeader?: string
   now?: () => number
   perIpProbesPerHour?: number
   perIpRegistrationsPerDay?: number
@@ -272,7 +274,7 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
   const regsPerIp = new RateLimiter(deps.perIpRegistrationsPerDay ?? 3, 86_400_000, now)
   const regs = new DailyCap(deps.registrationsPerDay ?? 20, now)
   const ip = (c: Context) =>
-    clientIp(c.req.raw.headers, (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress, !!deps.trustProxy)
+    clientIp(c.req.raw.headers, (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress, deps.trustProxy ?? false, deps.clientIpHeader)
   const bad = (c: Context, e: unknown, status: 400 | 422 = 422) => c.json({ error: (e as Error).message.slice(0, 400) }, status)
   // Tool names being registered right now: two concurrent listings can't both claim one.
   const claiming = new Set<string>()

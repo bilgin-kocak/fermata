@@ -52,6 +52,8 @@ export class HttpAttestor implements Attestor {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(input),
+        // Proving is serialised in the attestor; past this the call is left to its timeout refund.
+        signal: AbortSignal.timeout(Number(process.env.ATTEST_TIMEOUT_MS ?? 90_000)),
       })
     } catch (e) {
       return { kind: 'no-transcript', detail: `attestor unreachable: ${(e as Error).message}` }

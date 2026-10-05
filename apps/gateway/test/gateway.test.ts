@@ -253,6 +253,27 @@ describe('gateway', () => {
     expect((await store.get(callId))?.status).toBe('timed-out')
   })
 
+  it('a call cut off by a restart (held, not in flight) still gets its timeout refund', async () => {
+    const callId = keccak256(toHex('orphan')) as Hex
+    const now = new Date().toISOString()
+    await store.put({ callId, serviceId: sid, method: 'GET', target: '/v1/quote', requestHash: `0x${'33'.repeat(32)}`, holdTx: keccak256(toHex('h')), agent, deadline: '1120', status: 'held', createdAt: now, updatedAt: now })
+    chain.holds.set(callId.toLowerCase(), { status: 1, deadline: 1_120n, agent, serviceId: sid, requestHash: `0x${'33'.repeat(32)}` as Hex })
+    expect(await gw.sweep()).toEqual([]) // still inside the window
+    chain.time = 1_121n
+    expect(await gw.sweep()).toEqual([callId])
+    expect((await store.get(callId))?.status).toBe('timed-out')
+  })
+
+  it('turns new payers away (503, nothing charged) while proving is saturated', async () => {
+    const busy = await createGateway({
+      config: { ...config(), storageDir: store.dir }, chain, publicClient: chain.publicClient(), attestor, store,
+      secretKey: 'unit-test-secret-key-at-least-32-bytes!!', env: { VENDOR_TOKEN: 'x', GATEWAY_MAX_IN_FLIGHT: '0' }, log: () => {},
+    })
+    const res = await busy.app.request(`${BASE}/s/${sid}/v1/quote?symbol=BTC-USD`)
+    expect(res.status).toBe(503)
+    expect(res.headers.get('retry-after')).toBe('5')
+  })
+
   it('binding check failed: 502, awaiting timeout, no verdict', async () => {
     attestor.next = () => ({ kind: 'rejected', check: 'origin', detail: 'wrong server' })
     const res = await agentFetch()(`/s/${sid}/v1/quote?symbol=BTC-USD`)
@@ -454,7 +475,12 @@ describe('vendor scores', () => {
     const other = makeServiceId(agent, 'stranger')
     const held = (callId: Hex, svc: Hex, block: bigint) => ({ eventName: 'Held' as const, blockNumber: block, transactionHash: callId, args: { callId, serviceId: svc, agent, amount: 10_000n } })
     const c1 = keccak256(toHex('c1')), c2 = keccak256(toHex('c2')), c3 = keccak256(toHex('c3'))
+    const registered = (svc: Hex, verifier: Address) => ({ eventName: 'ServiceRegistered' as const, blockNumber: 0n, transactionHash: svc, args: { serviceId: svc, owner: vendor, token, payout: vendor, verifier, pricePerCall: 10_000n, settlementWindow: 120 } })
+    const selfVerified = makeServiceId(agent, 'fake')
     chain.scoringLogs = [
+      registered(sid, signer), registered(other, signer), registered(selfVerified, agent),
+      // a service that signs its own verdicts "releases" without any proof: never ranked
+      held(c3, selfVerified, 6n), { eventName: 'Released', blockNumber: 7n, transactionHash: c3, args: { callId: c3, serviceId: selfVerified, amount: 10_000n, fee: 50n, presentationHash: c3 } },
       held(c1, sid, 1n), { eventName: 'Released', blockNumber: 2n, transactionHash: c1, args: { callId: c1, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: c1 } },
       held(c2, sid, 3n), { eventName: 'Refunded', blockNumber: 4n, transactionHash: c2, args: { callId: c2, serviceId: sid, amount: 10_000n, presentationHash: `0x${'00'.repeat(32)}` } },
       held(c3, other, 5n),
@@ -463,13 +489,15 @@ describe('vendor scores', () => {
     expect(body.scannedTo).toBe('100')
     expect(body.caveats.join(' ')).toContain('pay itself')
     const mine = body.scores.find((s) => s.serviceId === sid)!
-    expect(mine).toMatchObject({ known: true, label: 'quote', upstream, released: 1, timeouts: 1, settled: 2, deliveryRate: 0.5, fewCalls: true, distinctAgents: 1 })
+    expect(mine).toMatchObject({ known: true, label: 'quote', upstream, released: 1, timeouts: 1, settled: 2, deliveryRate: 1, fewCalls: true, distinctAgents: 1 })
     expect(body.scores.find((s) => s.serviceId === other)).toMatchObject({ known: false, label: 'stranger', open: 1, deliveryRate: null })
+    expect(body.scores.find((s) => s.serviceId === selfVerified)).toBeUndefined()
   })
 
   it('MCP fermata_vendor_scores summarises the same numbers for an agent', async () => {
     const c1 = keccak256(toHex('m1'))
     chain.scoringLogs = [
+      { eventName: 'ServiceRegistered', blockNumber: 0n, transactionHash: c1, args: { serviceId: sid, owner: vendor, token, payout: vendor, verifier: signer, pricePerCall: 10_000n, settlementWindow: 120 } },
       { eventName: 'Held', blockNumber: 1n, transactionHash: c1, args: { callId: c1, serviceId: sid, agent, amount: 10_000n } },
       { eventName: 'Released', blockNumber: 2n, transactionHash: c1, args: { callId: c1, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: c1 } },
     ]

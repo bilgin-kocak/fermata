@@ -4,6 +4,8 @@
 
 **Chargebacks for machine payments, decided on cryptographic evidence instead of a support ticket.**
 
+**Live demo (Tempo Moderato testnet, no wallet needed):** [fermata-production-9378.up.railway.app/dashboard](https://fermata-production-9378.up.railway.app/dashboard/). Use Try it, the Vendors scoreboard, and List your API.
+
 A card payment has a chargeback: when the goods never arrive, the buyer disputes and a person
 reads the ticket. An agent paying an API per call has nothing — it pays, the API answers with a
 500 or with garbage, and the money is gone. Fermata is the chargeback for that payment, except no
@@ -111,7 +113,7 @@ claude mcp add fermata -e FERMATA_AGENT_KEY=0x… -e FERMATA_TRUSTED_VERIFIERS=0
 ## The product: pay on proof, vendor scores, self-serve onboarding
 
 Fermata is more than an escrow: every verdict is also an on-chain record of whether a vendor
-delivered. The hosted demo (Tempo testnet; [`deploy/`](deploy/README.md)) has three surfaces.
+delivered. The [hosted demo](https://fermata-production-9378.up.railway.app/dashboard/) (Tempo testnet; [`deploy/`](deploy/README.md)) has three surfaces.
 
 **Try it.** Each button makes a real paid call: hold on-chain, TLSNotary proof, settle.
 - A server-side demo agent pays, so visitors need no wallet.

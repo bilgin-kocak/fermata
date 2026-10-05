@@ -42,6 +42,8 @@ export type McpDeps = {
     req: { method: string; target: string; headers: Headers; body: Uint8Array },
     credential: { challenge: { request: unknown }; payload: unknown },
   ) => Promise<{ response: Response; record: CallRecord }>
+  /** True while proving is saturated: new payers are turned away before they pay. */
+  saturated?: () => boolean
 }
 
 /** The label packed into a serviceId (owner ‖ 12-byte label), when it is printable. */
@@ -159,6 +161,9 @@ export function mcpHandler(deps: McpDeps) {
     const target = targetFor(toolFor(svc), args)
     const body = new Uint8Array()
     const rh = requestHash(svc.serviceId, 'GET', target, body)
+    if (!meta?.[Mcp.credentialMetaKey] && deps.saturated?.()) {
+      return { content: [text('busy: other calls are being proved; nothing was charged, retry in a few seconds')], isError: true }
+    }
     const offer = { amount: svc.price.toString(), currency: svc.token, escrow: deps.escrow, chainId: deps.chainId, serviceId: svc.serviceId, requestHash: rh }
     const r = await pay.compose([deps.fermataHandler, offer] as never)({ _meta: meta } as never)
     if (r.status === 402) throw r.challenge

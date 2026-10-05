@@ -31,7 +31,7 @@ function setup(over: Partial<DemoDeps> = {}) {
   const app = new Hono()
   publicRoutes(app, deps)
   const call = (ip: string, kind = 'reliable') =>
-    app.request('/demo/call', { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': `${ip}, 10.0.0.1` }, body: JSON.stringify({ kind }) })
+    app.request('/demo/call', { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': `198.51.100.250, ${ip}` }, body: JSON.stringify({ kind }) })
   return { app, call, paid, balances, advance: (ms: number) => (t += ms), release: () => release?.() }
 }
 
@@ -53,10 +53,19 @@ describe('limits', () => {
     expect(cap.take()).toBe(true)
     expect(cap.remaining()).toBe(1)
   })
-  it('clientIp trusts X-Forwarded-For only behind our own proxy', () => {
-    const h = new Headers({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' })
+  it('clientIp trusts only the X-Forwarded-For entry our own proxy appended (the right-most)', () => {
+    // The client sent "1.2.3.4" itself to dodge the per-IP limit; the proxy appended the real address.
+    const h = new Headers({ 'x-forwarded-for': '1.2.3.4, 203.0.113.7' })
     expect(clientIp(h, '127.0.0.1', true)).toBe('203.0.113.7')
     expect(clientIp(h, '127.0.0.1', false)).toBe('127.0.0.1')
+    expect(clientIp(new Headers(), '127.0.0.1', true)).toBe('127.0.0.1')
+  })
+  it('clientIp with two appending proxies (Railway: client, then its edge hop) and with a named header', () => {
+    const h = new Headers({ 'x-forwarded-for': '1.2.3.4, 178.244.201.144, 152.233.12.241', 'cf-connecting-ip': '9.9.9.9' })
+    expect(clientIp(h, '127.0.0.1', 2)).toBe('178.244.201.144')
+    expect(clientIp(h, '127.0.0.1', 1)).toBe('152.233.12.241')
+    expect(clientIp(h, '127.0.0.1', 2, 'cf-connecting-ip')).toBe('9.9.9.9')
+    expect(clientIp(new Headers({ 'x-forwarded-for': '178.244.201.144' }), '10.0.0.1', 2)).toBe('10.0.0.1') // fewer hops than configured
   })
 })
 
@@ -76,8 +85,12 @@ describe('public demo routes', () => {
     expect(paid).toEqual([`${sid}/v1/quote?symbol=BTC-USD`])
   })
 
-  it('rejects unknown kinds', async () => {
-    expect((await setup().call('1.1.1.1', 'nope')).status).toBe(400)
+  it('rejects unknown kinds, including inherited object keys', async () => {
+    const s = setup()
+    expect((await s.call('1.1.1.1', 'nope')).status).toBe(400)
+    expect((await s.call('1.1.1.1', 'constructor')).status).toBe(400)
+    expect((await s.call('1.1.1.1', 'toString')).status).toBe(400)
+    expect(s.paid).toEqual([])
   })
 
   it('one call per visitor per window; other visitors are not affected', async () => {
@@ -89,6 +102,18 @@ describe('public demo routes', () => {
     expect((await call('203.0.113.2')).status).toBe(200)
     advance(20_000)
     expect((await call('203.0.113.1')).status).toBe(200)
+  })
+
+  it('a per-visitor daily quota: one address cannot use up the demo for everyone', async () => {
+    const { call, advance } = setup({ config: { kinds: { reliable: { serviceId: sid, path: '/x', label: 'R', description: '' } }, perIpSeconds: 20, perIpPerDay: 2, dailyCap: 100 } })
+    expect((await call('203.0.113.1')).status).toBe(200)
+    advance(20_000)
+    expect((await call('203.0.113.1')).status).toBe(200)
+    advance(20_000)
+    const third = await call('203.0.113.1')
+    expect(third.status).toBe(429)
+    expect(((await third.json()) as { error: string }).error).toContain('today')
+    expect((await call('203.0.113.9')).status).toBe(200) // others still can
   })
 
   it('one call in flight at a time', async () => {

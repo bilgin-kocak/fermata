@@ -77,9 +77,13 @@ else
   export NODE_USE_ENV_PROXY=1
 fi
 
-echo "== attestor build"
-(cd apps/attestor && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +1.95.0 build --release -q)
-BIN=$(cd apps/attestor && realpath "${CARGO_TARGET_DIR:-target}")/release/fermata-attest
+if [ -n "${FERMATA_ATTEST_BIN:-}" ]; then
+  BIN=$FERMATA_ATTEST_BIN # prebuilt (the Docker image): no cargo at runtime
+else
+  echo "== attestor build"
+  (cd apps/attestor && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +1.95.0 build --release -q)
+  BIN=$(cd apps/attestor && realpath "${CARGO_TARGET_DIR:-target}")/release/fermata-attest
+fi
 [ -f apps/vendor/certs/ca.pem ] || bash apps/vendor/gen-certs.sh > "$DIR/certs.log"
 CA=$PWD/apps/vendor/certs/ca.pem
 # (Re)build the dashboard when it is missing or older than its sources, so the stack never serves a stale UI.
@@ -122,7 +126,7 @@ PROXY_ENV=(); UPSTREAM_PROXY=${FERMATA_UPSTREAM_PROXY:-${HTTPS_PROXY:-${https_pr
 [ -n "$UPSTREAM_PROXY" ] && PROXY_ENV=(FERMATA_UPSTREAM_PROXY="$UPSTREAM_PROXY")
 bg attestor env ${PROXY_ENV[@]+"${PROXY_ENV[@]}"} VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
   --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla --predicate apps/attestor/predicates --predicate "$STATE/predicates" --storage "$STATE/presentations" \
-  --attempt-timeout-secs 10 "${RESOLVE[@]}"
+  --attempts "${ATTEST_ATTEMPTS:-$([ "${PUBLIC:-0}" = 1 ] && echo 1 || echo 3)}" --attempt-timeout-secs 10 "${RESOLVE[@]}"
 wait_port $ATTESTOR_PORT
 VERIFIER_ADDRESS=$(curl -s --noproxy '*' http://127.0.0.1:$ATTESTOR_PORT/healthz | jq -r .signer)
 
@@ -143,11 +147,16 @@ register_real() { # label upstream predicate summary tool-name tool-path example
     --predicate "apps/attestor/predicates/$3" --notary-public-key "$NOTARY_PUBLIC_KEY" --verifier "$VERIFIER_ADDRESS" \
     --window 120 --config "$CONFIG" --summary "$4" --tool-name "$5" --tool-path "$6" --example-path "$7" 2>> "$DIR/register.log"
 }
-SERVICE_NPM=""; SERVICE_COINBASE=""
+SERVICE_NPM=""; SERVICE_NPM404=""; SERVICE_COINBASE=""
 case ",$REAL_VENDORS," in *,npm,*)
   SERVICE_NPM=$(register_real npm-tags https://registry.npmjs.org npm-dist-tags-v1.json \
     "Latest published versions (dist-tags) of an npm package, from the real public npm registry." \
-    npm_latest_version '/-/package/{package}/dist-tags' /-/package/mppx/dist-tags) ;; esac
+    npm_latest_version '/-/package/{package}/dist-tags' /-/package/mppx/dist-tags)
+  # Public mode's "npm 404" button pays this separate listing: npm's correct 404 is a proven failure,
+  # and it must not count against the npm vendor's score.
+  [ "${PUBLIC:-0}" = 1 ] && SERVICE_NPM404=$(register_real npm-missing https://registry.npmjs.org npm-dist-tags-v1.json \
+    "Demo listing: the real npm registry asked for a package that does not exist (shows a proven 404 refund)." \
+    npm_missing_demo '/-/package/{package}/dist-tags' /-/package/no-such-package-fermata-zz/dist-tags) ;; esac
 case ",$REAL_VENDORS," in *,coinbase,*)
   SERVICE_COINBASE=$(register_real cb-spot https://api.coinbase.com coinbase-spot-v1.json \
     "Coinbase spot price for a pair such as BTC-USD, from the real public Coinbase API." \
@@ -157,24 +166,27 @@ case ",$REAL_VENDORS," in *,coinbase,*)
 PUBLIC_ENV=()
 if [ "${PUBLIC:-0}" = 1 ]; then
   echo "== public demo mode"
-  KINDS=$(jq -n --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" --arg npm "$SERVICE_NPM" '
+  KINDS=$(jq -n --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" --arg npm "$SERVICE_NPM" --arg npm404 "$SERVICE_NPM404" '
     {reliable: {serviceId: $ok, path: "/v1/quote?symbol=BTC-USD", label: "Reliable vendor", description: "A quote API that answers correctly: the proof passes and the vendor is paid."},
      broken: {serviceId: $e500, path: "/v1/quote?symbol=ETH-USD", label: "Broken vendor", description: "Answers HTTP 500: the proof shows the failure and you are refunded."},
      silent: {serviceId: $hang, path: "/v1/quote?symbol=SOL-USD", label: "Silent vendor", description: "Never answers: no proof, no verdict; the contract refunds after the 30 s window."}}
     + (if $npm == "" then {} else
       {npm: {serviceId: $npm, path: "/-/package/mppx/dist-tags", label: "Real API: npm registry", description: "The public npm registry over the open internet: a real 200, proved and paid."},
-       "npm-404": {serviceId: $npm, path: "/-/package/no-such-package-fermata-zz/dist-tags", label: "Real API: npm 404", description: "npm\u0027s genuine 404 for a missing package: proved, and refunded."}} end)')
-  jq --argjson kinds "$KINDS" '.demo = {kinds: $kinds, perIpSeconds: (env.DEMO_PER_IP_SECONDS // "20" | tonumber), dailyCap: (env.DEMO_DAILY_CAP // "500" | tonumber)}' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+       "npm-404": {serviceId: (if $npm404 == "" then $npm else $npm404 end), path: "/-/package/no-such-package-fermata-zz/dist-tags", label: "Real API: npm 404", description: "npm\u0027s genuine 404 for a missing package: proved, and refunded."}} end)')
+  jq --argjson kinds "$KINDS" '.demo = {kinds: $kinds, perIpSeconds: (env.DEMO_PER_IP_SECONDS // "60" | tonumber), perIpPerDay: (env.DEMO_PER_IP_PER_DAY // "15" | tonumber), dailyCap: (env.DEMO_DAILY_CAP // "500" | tonumber)}' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   if [ "$CHAIN" = anvil ]; then
     DEMO_AGENT_PRIVATE_KEY=$(cast wallet new --json | jq -r '(.data // .) | if type == "array" then .[0] else . end | .private_key')
     cast send -q --rpc-url "$RPC" --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
       0x20C0000000000000000000000000000000000000 'transfer(address,uint256)' "$(cast wallet address "$DEMO_AGENT_PRIVATE_KEY")" 10000000 > /dev/null
   fi
-  PUBLIC_ENV=(GATEWAY_PUBLIC=1 DEMO_AGENT_PRIVATE_KEY="${DEMO_AGENT_PRIVATE_KEY:?set DEMO_AGENT_PRIVATE_KEY in .env (a funded testnet key)}"
+  DEMO_AGENT_PRIVATE_KEY=${DEMO_AGENT_PRIVATE_KEY:-${AGENT_PRIVATE_KEY:-}}
+  PUBLIC_ENV=(GATEWAY_PUBLIC=1 DEMO_AGENT_PRIVATE_KEY="${DEMO_AGENT_PRIVATE_KEY:?set DEMO_AGENT_PRIVATE_KEY (or AGENT_PRIVATE_KEY) to a funded testnet key}"
     ONBOARD_PREDICATE_DIR="$(cd "$STATE" && pwd)/predicates" ONBOARD_SERVICES_FILE="$(cd "$STATE" && pwd)/onboarded.json" ${PROXY_ENV[@]+"${PROXY_ENV[@]}"})
   # services onboarded before this start keep being served
   if [ -f "$STATE/onboarded.json" ]; then
-    jq -s '.[0].services = ((.[0].services + (.[1].services // [])) | unique_by(.serviceId | ascii_downcase)) | .[0]' "$CONFIG" "$STATE/onboarded.json" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+    jq -s '(.[0].services | map(.serviceId | ascii_downcase)) as $have
+      | .[0].services += [(.[1].services // [])[] | select((.serviceId | ascii_downcase) as $id | $have | index($id) | not)] | .[0]' \
+      "$CONFIG" "$STATE/onboarded.json" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   fi
   [ -n "${ONBOARD_OPERATOR_PRIVATE_KEY:-}" ] && PUBLIC_ENV+=(ONBOARD_OPERATOR_PRIVATE_KEY="$ONBOARD_OPERATOR_PRIVATE_KEY")
 fi

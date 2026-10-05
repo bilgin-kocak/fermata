@@ -35,7 +35,11 @@ fi
 echo "== user and checkout"
 id fermata > /dev/null 2>&1 || useradd --system --create-home --home-dir "$USER_HOME" --shell /bin/bash fermata
 if [ -d "$DIR/.git" ]; then
-  git -C "$DIR" fetch -q origin "$BRANCH" && git -C "$DIR" checkout -q "$BRANCH" && git -C "$DIR" reset -q --hard "origin/$BRANCH"
+  # The checkout belongs to fermata: update it as fermata (root's git refuses another user's repo),
+  # one command per line so set -e stops on any failure instead of silently keeping the old code.
+  sudo -u fermata -H git -C "$DIR" fetch -q origin "$BRANCH"
+  sudo -u fermata -H git -C "$DIR" checkout -q "$BRANCH"
+  sudo -u fermata -H git -C "$DIR" reset -q --hard "origin/$BRANCH"
 else
   git clone -q --branch "$BRANCH" "$REPO" "$DIR"
 fi
@@ -66,7 +70,7 @@ systemctl daemon-reload
 cat <<EOF
 
 Installed. Next:
-  1. Keys: copy your Moderato .env to $DIR/.env (keeps your registered services), or create fresh
-     testnet keys: sudo -u fermata -H bash -lc 'cd $DIR && pnpm keys:init'
+  1. Keys: create fresh testnet keys for this server (recommended: a gateway sharing your laptop's
+     relayer key races it for nonces): sudo -u fermata -H bash -lc 'cd $DIR && pnpm keys:init'
   2. sudo bash $DIR/deploy/bootstrap.sh <your-domain | auto>     (auto = <ip>.sslip.io)
 EOF

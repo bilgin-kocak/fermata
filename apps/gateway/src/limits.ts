@@ -58,11 +58,21 @@ export class DailyCap {
   }
 }
 
-/** The client's IP: the first X-Forwarded-For hop when behind our own proxy (Caddy), else the socket. */
-export function clientIp(headers: Headers, socketIp: string | undefined, trustProxy: boolean): string {
-  if (trustProxy) {
-    const xff = headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    if (xff) return xff
+/**
+ * The client's IP. `trustProxy` is the number of proxies in front of the gateway that append to
+ * X-Forwarded-For (true = 1): the client's address is that many entries from the right, and entries
+ * further left come from the client itself and can be forged. Caddy: 1. Railway: its edge appends
+ * the client and then its own hop, so 2 (check with the visitor in the demo log). `header` names a
+ * header the proxy overwrites with the client address instead (e.g. cf-connecting-ip).
+ */
+export function clientIp(headers: Headers, socketIp: string | undefined, trustProxy: boolean | number, header?: string): string {
+  const hops = trustProxy === true ? 1 : Number(trustProxy) || 0
+  if (hops > 0) {
+    const named = header ? headers.get(header)?.trim() : undefined
+    if (named) return named
+    const xff = (headers.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+    const ip = xff[xff.length - hops]
+    if (ip) return ip
   }
   return socketIp ?? 'unknown'
 }

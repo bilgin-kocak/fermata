@@ -45,12 +45,19 @@ describe('aggregateScores', () => {
     ]
     const [a, b] = aggregateScores(logs.reverse()) // any input order
     expect(a!.serviceId).toBe(A)
-    expect(a).toMatchObject({ held: 7, released: 4, provenFailures: 1, timeouts: 1, open: 1, settled: 6, distinctAgents: 2, payout: agents[1], pricePerCall: 10_000n, registeredBlock: 1n })
-    expect(a!.deliveryRate).toBeCloseTo(4 / 6)
-    expect(a!.score).toBeCloseTo(wilsonLower(4, 6))
+    expect(a).toMatchObject({ held: 7, released: 4, provenFailures: 1, timeouts: 1, open: 1, settled: 6, distinctAgents: 2, payout: agents[1], verifier: owner, pricePerCall: 10_000n, registeredBlock: 1n })
+    // proven outcomes only: 4 released of 5 proven; the timeout is counted but not held against the vendor
+    expect(a!.deliveryRate).toBeCloseTo(4 / 5)
+    expect(a!.score).toBeCloseTo(wilsonLower(4, 5))
     expect(a!.releasedAmount).toBe(40_000n)
     expect(a!.refundedAmount).toBe(20_000n)
     expect(b).toMatchObject({ held: 2, released: 0, provenFailures: 2, deliveryRate: 0, score: 0 })
+  })
+
+  it('timeouts alone (e.g. a stranger holding calls and never presenting them) do not sink a vendor', () => {
+    const [s] = aggregateScores([...calls(A, ['released', 'released']), ...calls(A, Array(10).fill('timeout'))])
+    expect(s).toMatchObject({ released: 2, timeouts: 10, deliveryRate: 1 })
+    expect(s!.score).toBeCloseTo(wilsonLower(2, 2))
   })
 
   it('ignores a settlement seen twice (overlapping scans)', () => {

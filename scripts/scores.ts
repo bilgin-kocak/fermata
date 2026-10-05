@@ -1,9 +1,10 @@
-// pnpm scores [--chain anvil|moderato] [--rpc URL] [--escrow 0x…] [--from-block N] [--json]
+// pnpm scores [--chain anvil|moderato] [--rpc URL] [--escrow 0x…] [--verifier 0x…] [--from-block N] [--json]
 //
 // Vendor delivery scores recomputed straight from the chain: no gateway, no database. Reads the
 // escrow's ServiceRegistered / Held / Released / Refunded events and ranks services by the Wilson
 // 95 % lower bound of their delivery rate (packages/sdk/src/scores.ts). The gateway's /scores and
-// the dashboard's Vendors tab run the same code; this is how anyone checks them.
+// the dashboard's Vendors tab run the same code; this is how anyone checks them. --verifier keeps only
+// services settled by that verifier, as the gateway does with its own attestor (shown on /scores).
 import { existsSync, readFileSync } from 'node:fs'
 import { createPublicClient, http, type Address } from 'viem'
 import { aggregateScores, escrowDeployment, fetchEscrowLogs, serviceLabelOf, tempoChain } from '@fermata/sdk'
@@ -26,7 +27,8 @@ const fromBlock = BigInt(typeof args['from-block'] === 'string' ? args['from-blo
 
 const client = createPublicClient({ chain: tempoChain(rpc), transport: http(rpc) })
 const { logs, toBlock } = await fetchEscrowLogs(client as never, escrow, fromBlock)
-const scores = aggregateScores(logs)
+const verifier = typeof args.verifier === 'string' ? args.verifier.toLowerCase() : undefined
+const scores = aggregateScores(logs).filter((s) => !verifier || s.verifier?.toLowerCase() === verifier)
 
 if (args.json) {
   console.log(toJson({ chain, escrow, fromBlock, toBlock, scores }, 2))
@@ -49,5 +51,6 @@ if (args.json) {
   const line = (r: string[]) => r.map((c, i) => c.padEnd(w[i]!)).join('  ')
   console.log(`vendor scores on ${chain}, escrow ${escrow}, blocks ${fromBlock}–${toBlock} (${logs.length} events)\n`)
   console.log([line(head), w.map((n) => '-'.repeat(n)).join('  '), ...rows.map(line)].join('\n'))
-  console.log('\nOnly calls paid through Fermata count; a vendor could pay itself, so distinct agents are shown.')
+  console.log('\nThe rate counts proven outcomes only (timeouts are shown, not ranked). Only calls paid through Fermata count;')
+  console.log(`a vendor could pay itself, so distinct agents are shown.${verifier ? '' : ' Pass --verifier <the gateway attestor> to rank only services it settles.'}`)
 }

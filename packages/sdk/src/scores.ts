@@ -3,8 +3,11 @@
 //
 // A Refunded event with presentationHash ≠ 0 is a *proven* failure (a verdict backed by a TLSNotary
 // presentation); presentationHash = 0 is a timeout refund (no proof arrived inside the window).
-// Ranking uses the Wilson score lower bound (95 %) of the delivery rate, so a vendor with 3/3 does
-// not outrank one with 950/1000.
+// The delivery rate counts proven outcomes only (released vs proven failures): a timeout proves
+// nothing about the vendor, since anyone can hold a call and never present it. Ranking uses the
+// Wilson score lower bound (95 %) of that rate, so a vendor with 3/3 does not outrank one with
+// 950/1000. A ranking should only include services whose verifier it trusts (ServiceRegistered
+// carries it): a service that names itself as verifier can sign "deliveries" with no proof.
 //
 // Limits (shown wherever scores are shown): only calls paid through Fermata count, and a vendor can
 // pay itself to inflate its score; distinct agents are reported for that reason.
@@ -25,6 +28,8 @@ export type ServiceScore = {
   /** From ServiceRegistered (absent if registration predates the scanned range). */
   owner?: Address
   payout?: Address
+  /** Who signs this service's verdicts. A ranking should only trust verifiers it knows. */
+  verifier?: Address
   pricePerCall?: bigint
   registeredBlock?: bigint
   held: number
@@ -36,9 +41,13 @@ export type ServiceScore = {
   /** Held, not yet settled. */
   open: number
   settled: number
-  /** released / settled, or null before the first settlement. */
+  /**
+   * released / (released + provenFailures): the share of PROVEN outcomes that were deliveries, or null
+   * before the first one. Timeouts are shown but not counted: anyone can hold a call directly and
+   * never present it, so a timeout says nothing provable about the vendor.
+   */
   deliveryRate: number | null
-  /** Wilson 95 % lower bound of the delivery rate (0 with no settlements): the ranking key. */
+  /** Wilson 95 % lower bound of the delivery rate (0 with no proven outcome): the ranking key. */
   score: number
   distinctAgents: number
   releasedAmount: bigint
@@ -74,7 +83,7 @@ export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
     const s = get(log.args.serviceId)
     switch (log.eventName) {
       case 'ServiceRegistered':
-        Object.assign(s, { owner: log.args.owner, payout: log.args.payout, pricePerCall: log.args.pricePerCall, registeredBlock: log.blockNumber })
+        Object.assign(s, { owner: log.args.owner, payout: log.args.payout, verifier: log.args.verifier, pricePerCall: log.args.pricePerCall, registeredBlock: log.blockNumber })
         break
       case 'Held':
         s.held++
@@ -103,8 +112,9 @@ export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
   for (const { agents, settledCalls, ...s } of by.values()) {
     s.settled = s.released + s.provenFailures + s.timeouts
     s.open = Math.max(0, s.held - s.settled)
-    s.deliveryRate = s.settled ? s.released / s.settled : null
-    s.score = wilsonLower(s.released, s.settled)
+    const proven = s.released + s.provenFailures
+    s.deliveryRate = proven ? s.released / proven : null
+    s.score = wilsonLower(s.released, proven)
     s.distinctAgents = agents.size
     out.push(s)
   }

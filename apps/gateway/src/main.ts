@@ -56,7 +56,8 @@ async function demoDeps() {
   const token = TOKENS.pathUSD as Address
   return {
     config: config.demo,
-    trustProxy: process.env.GATEWAY_TRUST_PROXY === '1',
+    trustProxy: Number(process.env.GATEWAY_TRUST_PROXY ?? 0),
+    clientIpHeader: process.env.GATEWAY_CLIENT_IP_HEADER || undefined,
     wallets: [
       { name: 'demo agent', address: agent.address },
       { name: 'relayer', address: relayer.account.address },
@@ -83,7 +84,8 @@ function onboardDeps() {
   mkdirSync(predicateDir, { recursive: true })
   const operator = createWalletClient({ account: privateKeyToAccount((process.env.ONBOARD_OPERATOR_PRIVATE_KEY || required('RELAYER_PRIVATE_KEY')) as Hex), chain: chainDef, transport: http(config.rpc) })
   return {
-    trustProxy: process.env.GATEWAY_TRUST_PROXY === '1',
+    trustProxy: Number(process.env.GATEWAY_TRUST_PROXY ?? 0),
+    clientIpHeader: process.env.GATEWAY_CLIENT_IP_HEADER || undefined,
     probe: (t: Parameters<typeof probeVendor>[0]) => probeVendor(t, { proxy: process.env.FERMATA_UPSTREAM_PROXY || undefined }),
     register: async (
       input: { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string },

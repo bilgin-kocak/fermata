@@ -1,0 +1,16 @@
+# Never in the image: secrets, build output, local state, dependencies (installed in the image).
+.env
+.env.*
+!.env.example
+**/node_modules
+**/target
+**/dist
+out
+storage
+apps/vendor/certs
+contracts/out
+contracts/cache
+contracts/broadcast
+contracts/lib
+spikes
+.git

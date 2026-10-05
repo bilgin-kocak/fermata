@@ -20,7 +20,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | 3-minute demo | ⏳ | same video; the live part follows DEMO.md's "live single call" script |
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
-| Live demo | ⏳ | **TODO (Bilgin): deploy with [`deploy/README.md`](../deploy/README.md) (3 commands), paste `https://<host>/dashboard/` here.** It offers Try it, Vendor scores and List your API on Tempo testnet. |
+| Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores and List your API; `deploy/smoke.sh` passes 7/7 against it. |
 | Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides; downloads as PPTX/PDF). **It is private until Bilgin shares it** from the page's Share menu. Its speaker notes are the script for the separate 2–3 minute pitch video. |
 
 ## Description
