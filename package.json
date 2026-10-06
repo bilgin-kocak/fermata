@@ -1,5 +1,6 @@
 {
   "name": "fermata",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Fermata — pay on proof: escrowed machine payments on Tempo, released on TLSNotary evidence",

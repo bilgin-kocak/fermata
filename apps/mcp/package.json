@@ -1,10 +1,13 @@
 {
   "name": "@fermata/mcp",
+  "license": "MIT",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "description": "Fermata for MCP agents (Claude Code, Claude Desktop, …): a local stdio MCP server that pays a Fermata gateway's tools with the agent's testnet wallet — escrowed, released only on a TLSNotary proof, refunded on failure",
-  "bin": { "fermata-mcp": "src/index.ts" },
+  "bin": {
+    "fermata-mcp": "src/index.ts"
+  },
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit"
