@@ -1,156 +1,160 @@
-# DEMO.md — the video (2:40) and the live demo
+# DEMO.md — the product-demo video (≤ 3:00)
 
-Target length **2:40** (limit 3:00). Voice-over at ≈ 150 words per minute; each beat's voice-over is
-shorter than its slot (≈ 2:11 of speech in 2:40), leaving room to pause on the numbers.
-Everything shown is the real system — no mock-ups, no edited numbers.
-The recorded clips are **Anvil's Tempo emulation** and the lower-third says so ("local Tempo
-emulation, chain ID 42431"). The same runs passed on **Tempo Moderato testnet** on 2026-10-01
-(`demo:cases` 3/3, 100 calls → 96/4; README and FACTS §15.5): the video says so with a Moderato
-card and an explorer shot, and never passes Anvil footage off as testnet.
+Colosseum asks for two videos: a 2–3 minute presentation ([`PITCH.md`](PITCH.md)) and a product demo
+"of no more than three minutes explaining how the product works". This is the demo. It is recorded on
+the **live demo on Tempo Moderato testnet**, <https://fermata-production-9378.up.railway.app/dashboard/>:
+every payment you show is real and has an explorer link.
 
-Freeze: demo, video and README frozen from **2026-10-09**.
+Target **2:45**. The voice-over below is about 245 words (≈ 1:55 at a relaxed 130 words per minute),
+which leaves about a minute for the clicks and the waits. Freeze: demo, video and README frozen from **2026-10-09**.
 
-## Footage
+## Before recording
 
-Raw clips are recorded headless from a running stack (1280×720, webm, real time, nothing
-re-timed). They are not committed; regenerate them:
-
-```sh
-bash scripts/demo-stack.sh up --chain anvil
-# playwright-core is not a repo dependency: `npm i playwright-core` in any scratch directory
-PW_CORE_DIR=<that directory> CHROMIUM=<path to chrome> node scripts/record/record.mjs --calls 100
-bash scripts/demo-stack.sh down
-```
-
-| Clip (`out/video/`) | Length | What it shows |
-|---|---|---|
-| `terminal-cases.webm` | 37 s | `pnpm demo:cases`: the three canonical cases with ✓ checks and the pass/fail table |
-| `dashboard-load.webm` | 4:25 | the Live tab for the whole `demo:load --calls 100` run; tiles count up, feed scrolls |
-| `drawer-reverify.webm` | 39 s | a Released call's proof drawer → Re-verify offline (all ✓), then a Refunded one |
-| `reconciliation.webm` | 25 s | the Reconciliation tab scrolling through memo matches, then the one-command check |
-| `stills/*.png` | — | keyframes of each clip; five are committed as `docs/img/video-*.png` |
-
-The recorded run (2026-09-29, Anvil): 100 calls, **95 released / 5 refunded** (the vendor fails at
-random at 3 %, so a run lands anywhere around 97/3), 254.1 s wall-clock, 2.24 s per call (p50),
-1.26 s MPC-TLS proving (p50), 65.9 MB MPC traffic per call. Quote these numbers with this footage;
-`out/demo/load-anvil.json` has the full record.
-
-![Final tiles of the recorded 100-call run](img/video-load-end.png)
-
-Also needed, recorded by Bilgin: a browser capture of the Moderato explorer (the escrow address
-page and the release settle tx from the README's "Case (Moderato)" table); a face or voice intro
-(optional); and a screen capture of a real terminal for the live single call (below) if the video
-includes a live part.
+1. **Per-visitor limits.** You will click several buttons in a row, so relax the limits for the
+   recording and restore them afterwards. Each `--set` redeploys the service (about 2–3 minutes; calls,
+   proofs and scores are kept), so wait until `/demo/status` answers again before you start:
+   ```sh
+   railway variables --service fermata --set DEMO_PER_IP_SECONDS=5 --set DEMO_PER_IP_PER_DAY=500
+   # afterwards:
+   railway variables --service fermata --set DEMO_PER_IP_SECONDS=60 --set DEMO_PER_IP_PER_DAY=15
+   curl -s https://fermata-production-9378.up.railway.app/demo/status | jq .perIpSeconds   # → 60
+   ```
+   (On 2026-10-05 the relaxed value, 5, is live: restore it after recording.)
+2. **Connect Claude Code to the live gateway** (once; the agent key is `AGENT_PRIVATE_KEY` from your
+   local `.env`, a funded testnet key):
+   ```sh
+   claude mcp add fermata \
+     -e FERMATA_GATEWAY=https://fermata-production-9378.up.railway.app \
+     -e FERMATA_AGENT_KEY=<AGENT_PRIVATE_KEY from .env> \
+     -e TEMPO_RPC_URL=https://rpc.moderato.tempo.xyz \
+     -e FERMATA_TRUSTED_VERIFIERS=0xb8718ad26e9ae0058b8b1a369295b374d99af599 \
+     -- "$PWD/node_modules/.bin/tsx" "$PWD/apps/mcp/src/index.ts"
+   ```
+   Do a dry run off camera with the scene's exact prompt, starting Claude Code as
+   `claude --allowedTools "mcp__fermata"` so no tool-permission prompt appears on camera (or approve
+   each tool once in the dry run). Never call `get_quote` in a dry run: it is the 100-call vendor, and
+   one more call changes the 96/100 the Vendors scene shows.
+3. **The offline verifier** for the last scene: `(cd apps/attestor && cargo +1.95.0 build --release)`.
+4. **Screen:** browser at 1920×1080 (or 1280×720), dark mode, zoom 100 %, no other tabs or
+   notifications; terminal font ≥ 16 px. Three windows: the dashboard, a terminal with Claude Code,
+   a terminal in the repo.
+5. **Never on screen:** `.env`, `.env.railway`, the Railway variables page.
 
 ## Storyboard
 
-### 0:00–0:15 · The problem (15 s · VO 35 words ≈ 14 s)
+Lower-third for the whole video: **Tempo Moderato testnet · fermata-production-9378.up.railway.app**.
 
-**Picture:** black title card, 𝄐 logo, then a plain terminal line: an agent's `fetch` gets a
-`500 Internal Server Error` after paying $0.01. Caption: *paid · 500 · no recourse*.
+### 0:00–0:18 · Open (dashboard, Live tab)
 
-**Voice-over:**
-> AI agents now pay for APIs per call — a cent here, a cent there. When the API fails, returns
-> garbage, or never answers, the money is simply gone. There is no chargeback for machines.
+**Show:** the dashboard header and tiles; the **Try it** panel. Optional, over the second sentence:
+4 s of the README's flow diagram (agent → escrow on Tempo → gateway → TLSNotary → vendor).
 
-### 0:15–0:35 · What Fermata is (20 s · VO 50 words ≈ 20 s)
+> This is Fermata, live on Tempo's testnet. An agent's payment waits in escrow while TLSNotary proves
+> what the vendor answered: if it passes the vendor's rule, the vendor is paid; if not, the agent is
+> refunded.
 
-**Picture:** the README's flow diagram (Mermaid, zoomed), animated left to right: *hold → proof →
-release / refund*. Then `docs/img/logo.png` with the pitch line.
+### 0:18–0:50 · A delivery is released (Try it → Reliable vendor)
 
-**Voice-over:**
-> Fermata is the chargeback for machine payments — decided on cryptographic evidence instead of
-> a support ticket. The agent's payment is held in escrow on Tempo. TLSNotary records exactly
-> what the vendor's server sent. If it passes the agreed check, the vendor is paid. If not, the
-> agent is refunded.
+**Show:** click **Reliable vendor**. The note "Holding the price in escrow, proving the vendor's
+answer with TLSNotary, settling…" appears, then **✓ Released to the vendor**. Click **Open the
+proof**: the vendor's HTTP response, the verdict. Click **Re-verify offline**: every hash ✓. Click the
+settle transaction link: the transaction on Tempo's explorer (don't zoom on its Memo field: the
+explorer prints the 32-byte memo as raw text; the memo point is made on the Reconciliation tab).
 
-**On-screen text (hold 3 s):** *Receipts prove the buyer paid. Fermata proves what the seller
-delivered.*
+> I press Reliable vendor: held, proved, released. 99.5 percent to the vendor, half a percent fee.
+> The proof shows exactly what the vendor's server sent, and Re-verify checks every hash against the
+> chain. Here is the payout on Tempo's explorer.
 
-### 0:35–2:05 · The 100-call run (90 s · VO 176 words ≈ 70 s; the rest is picture)
+### 0:50–1:12 · Failures are refunded (Broken vendor, Silent vendor)
 
-| Time | Picture | Source |
-|---|---|---|
-| 0:35–0:50 | `terminal-cases.webm`, the three PASS blocks and the table | real time, cut to the three results |
-| 0:50–1:25 | `dashboard-load.webm`, **sped up ≈ 7.5×** (label *"7.5× speed · 100 calls in 4 min 14 s real time"*); tiles count up, feed fills, Refunded rows appear | `stills/load-*.png` for the freeze-frames |
-| 1:25–1:30 | freeze-frame on the final tiles: **100 held · 95 released · 5 refunded · 0 awaiting timeout**, then a card: *"Same 100 calls on Tempo Moderato testnet: 96 released · 4 refunded · 0 errors"* over the Moderato explorer page of escrow `0x88A9…0763` | `stills/load-end.png`; explorer capture (Bilgin, below) |
-| 1:30–2:05 | `drawer-reverify.webm`: open a Released call → transcript (auth header masked) → **Re-verify offline** → every hash ✓ next to the on-chain value; then a Refunded call showing the proved 500 | real time, trimmed |
+**Show:** click **Broken vendor** → **↩ Refunded to the agent (proven failure)**; open the proof:
+the HTTP 500. Click **Silent vendor**: after its 10 s proving attempt gives up, **⏳ No proof: the
+contract refunds the agent once the window closes** · the vendor never answered. Cut; about 35 s after
+the click the same call reads **⏱ Refunded (timeout)** in the feed (measured on the live demo:
+37 s from click to refund).
 
-**Voice-over:**
-> Here is the whole thing, end to end. Three canonical cases: the vendor delivers, and it's paid.
-> The vendor returns an authenticated 500, and the agent gets its money back. The vendor never
-> answers — no transcript, no verdict — and after the settlement window the hold is refunded by
-> the contract.
->
-> Now a hundred calls. An agent buys a hundred quotes through Fermata, and the vendor fails about
-> three percent of the time, at random. Every call is held on-chain, proven with TLSNotary, and
-> settled — nobody touches anything. In this run, ninety-five
-> released and five refunded — every failure proven, and paid back by the contract. On Tempo's
-> Moderato testnet the same hundred calls gave ninety-six and four.
->
-> Open any call. This is what the vendor's server actually sent; a credential, if the API had one,
-> would be redacted. The proof is signed by the notary, and anyone can download it and re-verify it
-> offline, with no key. Every recomputed hash matches the one on-chain. And this one — a real
-> 500, proven, refunded.
+> A broken vendor answers HTTP 500: a proven failure, refunded. A silent vendor never answers: no
+> proof, no verdict, and after its 30-second window the contract refunds the agent anyway.
 
-**Optional 10 s insert (from `pnpm demo:real`):** a terminal shot of npm's real 404 being refunded.
-Line: *"And it isn't our mock. Here Fermata proves the real npm registry: a real 404, refunded."*
+### 1:12–1:22 · A real API (Real API: npm registry)
 
-### 2:05–2:25 · Reconciliation by memo (20 s · VO 37 words ≈ 15 s)
+**Show:** click **Real API: npm registry** → **✓ Released to the vendor** · vendor answered HTTP 200.
+Open its proof drawer and copy its full **Call id** for the last scene.
 
-**Picture:** `reconciliation.webm`: rows with hold → release + fee, or hold → refund, each ✓;
-end on the footer's one-line `cast logs` command. Optional 3 s cut: the Moderato explorer page of
-the release settle tx (README "Case (Moderato)" table) showing the two `TransferWithMemo` logs.
+> This one is the real npm registry, over the open internet, proved and settled.
 
-**Voice-over:**
-> Every movement is a Tempo TIP-20 transfer whose memo is the call's ID. So the books reconcile
-> from the chain alone: hold, then release and fee, or refund — per call, one query, no database
-> to trust.
+### 1:22–1:50 · Claude pays on proof (Claude Code terminal)
 
-**Optional 10 s insert (live site):**
-- **Picture:** the Vendors tab (scores from on-chain events), then the List your API tab drafting a delivery rule for a real URL.
-- **Line:** *"Every verdict also builds a public record of who delivers, and any API can list itself in a minute."*
+**Show:** in Claude Code paste (don't type): *Get the BTC price with get_quote_reliable, then try get_quote_broken, and verify both calls.* Let Claude's answer scroll: one released, one refunded,
+both verified. The paid calls take several seconds each on Moderato: speed that stretch up in the edit
+(label it "sped up") and keep Claude's summary at normal speed.
 
-### 2:25–2:40 · Roadmap and ask (15 s · VO 29 words ≈ 12 s)
+> Agents can also pay through MCP tools. I ask Claude for two quotes: the reliable call is released,
+> the broken one refunded, and Claude has both proofs re-checked.
 
-**Picture:** roadmap list from the README, then the logo, the GitHub URL and *Pay on proof.*
+### 1:50–2:02 · The books reconcile from the chain (Reconciliation tab)
 
-**Voice-over:**
-> Next: session escrow and sampled proving to bring the cost below a cent, and vendor-chosen
-> verifiers. We're looking for API vendors selling to agents. Fermata — pay on proof.
+**Show:** the **Reconciliation** tab: the latest calls, each "✓ matches the outcome", with its
+movements.
 
-**On-screen text:** github.com/bilgin-kocak/fermata · Tempo track · Colosseum Crypto World's Fair
+> Every payment carries the call ID as its memo, so anyone can reconcile each call from chain logs
+> alone, without our database.
+
+### 2:02–2:24 · Scores and self-serve listing (Vendors, then List your API)
+
+**Show:** the **Vendors** tab: the top row, **get_quote**, at 96/100 delivered. Then **List your API**:
+the URL field already holds `https://registry.npmjs.org/-/package/viem/dist-tags`; click **Check
+compatibility**, show the drafted delivery rule (no need to register on camera).
+
+> Verdicts feed a public scoreboard of proven outcomes: this vendor delivered ninety-six of a
+> hundred. And a vendor lists its API by pasting a URL: Fermata checks it can be proved and drafts
+> the delivery rule.
+
+### 2:24–2:45 · Check it yourself (repo terminal), then the end card
+
+**Show:** `pnpm reverify --call <the npm call's full Call id> --gateway https://fermata-production-9378.up.railway.app`
+→ the ✓ lines and **VERIFIED**. End card: the live URL and github.com/bilgin-kocak/fermata.
+
+> You don't have to trust our dashboard: pnpm reverify checks the proof offline against the chain.
+> In version one we run the notary and sign the verdicts, so a dishonest verdict is detectable, not
+> prevented. Try it at the link below.
 
 ## Claims the video may make (and may not)
 
-- ✅ "Anyone can re-verify the evidence offline." ✅ "Refunds by rule: a verified failure or no
-  proof in time." ✅ "Memo = call ID on every transfer."
-- ❌ Never "trustless" or "decentralized adjudication": in v1 a disclosed Fermata verifier signs
-  the verdict; independent verification is not independent adjudication.
-- ❌ Never "the data is correct" — the proof shows what the server sent, not that the price is right.
-- ❌ Never latency guarantees — the transcript has no trusted clock.
-- ✅ "Runs on Tempo Moderato testnet" — with the 2026-10-01 numbers (3/3 cases, 96/4 on 100 calls).
-- ❌ Never present the Anvil clips as testnet footage: they carry the "local Tempo emulation" caption.
+- ✅ "Anyone can re-verify the evidence offline" (`pnpm reverify`, `fermata-attest verify --offline`).
+- ✅ "Refunds by rule: a proven failure, or no proof in time." ✅ "Memo = call ID on every transfer."
+- ✅ "Live on Tempo Moderato testnet": the live URL; 100 calls through it → 96/4, 0 errors (2026-10-05).
+- ❌ Never "trustless", "decentralized adjudication" or "no trust in us": in v1 our verifier signs the
+  verdict and we run the notary. The dashboard's **Re-verify** and Claude's `fermata_verify` both run
+  on our gateway; `pnpm reverify` is the check that doesn't.
+- ❌ Never "any cheating is detectable": only a verdict that contradicts its proof is (README, note ²).
+- ❌ Never "the data is correct": the proof shows what the server sent, not that a price is right.
+- ❌ Never latency guarantees: the transcript has no trusted clock.
+- ❌ Never that sampled proving, session escrow or vendor-chosen verifiers exist: they are the roadmap.
 
-## Live single call (fallback / live demo, ≈ 60 s)
+## Fallback: a local recording
 
-The brief allows showing the recorded 100-call run plus one live call.
+If the live demo is down while you record, run the same story locally and caption it **"local Tempo
+emulation"** (never pass it off as testnet):
 
-1. `bash scripts/demo-stack.sh up --chain anvil` (before going live; ≈ 20 s with a built attestor).
-2. Open `http://127.0.0.1:4300/dashboard` → **Live** tab, dark mode, browser at 1280×720.
-3. In a terminal next to it: `pnpm demo:agent --calls 1 --service ok`. Point at the line
-   `DELIVERED 0x…  HTTP 200`.
-4. On the dashboard the call appears as *Held — proving*, then **Released** within ≈ 2 s.
-5. Click it → drawer: transcript, notary key, verdict signature → **Re-verify offline** → all ✓.
-6. **Download proof** — the `.tlsn` file is the evidence anyone can re-check.
-7. `pnpm demo:agent --calls 1 --service e500` → **Refunded (verified failure)**; open it: the proved 500.
-8. **Reconciliation** tab: both calls, memo = callId, ✓.
+```sh
+PUBLIC=1 bash scripts/demo-stack.sh up --chain anvil   # Try it, Vendors and List your API included
+pnpm demo:load --calls 100 --chain anvil               # fills the Vendors tab
+open http://127.0.0.1:4300/dashboard
+bash scripts/demo-stack.sh down                        # afterwards
+```
+
+`node scripts/record/record.mjs` records headless clips of a running stack (see its header; it
+needs `playwright-core` and Chromium).
 
 ## Pre-record checklist
 
-- [ ] `pnpm demo:cases` 3/3 PASS on the chain being shown; `demo:load` recorded on the same stack.
-- [ ] Dashboard in dark mode, zoom 100 %, no other tabs/notifications; terminal font ≥ 16 px.
-- [ ] Lower-third names the chain (Anvil Tempo emulation or Moderato with explorer links).
-- [ ] No private keys on screen (`.env` never opened; Anvil keys are public dev keys).
-- [ ] Numbers spoken match `out/demo/load-<chain>.json` and FACTS §15.4.
+- [ ] Per-visitor limits relaxed on Railway and the redeploy finished; restored afterwards (`perIpSeconds` → 60).
+- [ ] Claude Code connected to the live gateway; the scene's prompt worked in a dry run, with no permission prompt.
+- [ ] Every Try it button pressed once off camera. (Silent vendor checked on the live demo on 2026-10-05:
+      no proof after its 10 s attempt, **⏱ Refunded (timeout)** 37 s after the click.)
+- [ ] `fermata-attest` built locally for `pnpm reverify`.
+- [ ] Dark mode, zoom 100 %, no notifications; terminal font ≥ 16 px.
+- [ ] No keys on screen (`.env`, `.env.railway`, Railway variables).
+- [ ] Numbers spoken match the screen (Vendors tab) and the README.
 - [ ] Total ≤ 3:00; captions exported.

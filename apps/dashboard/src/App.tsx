@@ -441,19 +441,25 @@ function CallDrawer({ call, info, onClose }: { call: Call; info?: Info; onClose:
 function ReconciliationTab({ calls, info }: { calls: Call[]; info?: Info }) {
   const [recs, setRecs] = useState<Record<string, Reconciliation | string>>({})
   const recent = useMemo(() => [...calls].reverse().slice(0, 30), [calls])
+  // Each row is checked once per status, three at a time, newest first. Rows already queued are not
+  // queued again when the call list refreshes (every 2 s), so requests never pile up.
+  const queued = useRef(new Set<string>())
   useEffect(() => {
-    let alive = true
-    for (const c of recent) {
+    const todo = recent.filter((c) => {
       const done = recs[c.callId]
-      if (done && typeof done !== 'string' && done.status === c.status) continue
-      api
-        .reconcile(c.callId)
-        .then((r) => alive && setRecs((m) => ({ ...m, [c.callId]: r })))
-        .catch((e: Error) => alive && setRecs((m) => ({ ...m, [c.callId]: e.message })))
+      const key = `${c.callId}:${c.status}`
+      if ((done && typeof done !== 'string' && done.status === c.status) || queued.current.has(key)) return false
+      queued.current.add(key)
+      return true
+    })
+    const worker = async () => {
+      for (let c = todo.shift(); c; c = todo.shift()) {
+        const r = await api.reconcile(c.callId).catch((e: Error) => e.message)
+        setRecs((m) => ({ ...m, [c.callId]: r }))
+        if (typeof r === 'string') queued.current.delete(`${c.callId}:${c.status}`) // retry on the next refresh
+      }
     }
-    return () => {
-      alive = false
-    }
+    for (let i = 0; i < 3; i++) void worker()
   }, [recent]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="panel">

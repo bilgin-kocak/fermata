@@ -392,9 +392,13 @@ export async function createGateway(deps: GatewayDeps) {
   const receiptLogs = async (hash?: Hex) => (await receiptOf(hash))?.logs ?? []
 
   /** An accountant's view of one call: every TIP-20 movement tagged with its callId, checked against the outcome. */
+  // A final call's movements never change: answer it from memory after the first scan.
+  const reconciled = new Map<string, unknown>()
   app.get('/reconcile/:callId', async (c) => {
     const record = await store.get(c.req.param('callId')).catch(() => undefined)
     if (!record) return c.json({ error: 'unknown call' }, 404)
+    const cacheKey = `${record.callId.toLowerCase()}:${record.status}`
+    if (reconciled.has(cacheKey)) return c.json(reconciled.get(cacheKey))
     const svc = services.get(record.serviceId.toLowerCase())
     if (!svc) return c.json({ error: 'service no longer served' }, 404)
     // Scan from the hold's block to the settlement's: one getLogs (the RPC caps the range). Without a
@@ -422,7 +426,9 @@ export async function createGateway(deps: GatewayDeps) {
       (record.status === 'released' ? settled && !toAgent
         : record.status === 'refunded' || record.status === 'timed-out' ? settled && toAgent
         : rest.length === 0)
-    return c.json(plain({ callId: record.callId, status: record.status, token: svc.token, expected, match, movements, ignored: all.length - movements.length }))
+    const body = plain({ callId: record.callId, status: record.status, token: svc.token, expected, match, movements, ignored: all.length - movements.length })
+    if (FINAL.includes(record.status) && match) reconciled.set(cacheKey, body)
+    return c.json(body)
   })
 
   /** Re-verify a call's proof offline (attestor, no key) and compare every hash with the chain. */

@@ -6,6 +6,8 @@
 
 **Live demo (Tempo Moderato testnet, no wallet needed):** [fermata-production-9378.up.railway.app/dashboard](https://fermata-production-9378.up.railway.app/dashboard/). Use Try it, the Vendors scoreboard, and List your API.
 
+**Videos:** [pitch (≈ 3 min)](https://www.loom.com/share/35084c15407244d8b9e91c1d69b220b3) · [product demo](https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9).
+
 A card payment has a chargeback: when the goods never arrive, the buyer disputes and a person
 reads the ticket. An agent paying an API per call has nothing — it pays, the API answers with a
 500 or with garbage, and the money is gone. Fermata is the chargeback for that payment, except no

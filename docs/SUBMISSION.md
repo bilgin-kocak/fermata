@@ -15,13 +15,13 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | Team | ✅ | Bilgin Kocak (solo) — GitHub [@bilgin-kocak](https://github.com/bilgin-kocak) |
 | Location | ✅ | Eskişehir, Turkey |
 | Logo (𝄐) | ✅ | [`docs/img/logo.svg`](img/logo.svg), [`docs/img/logo.png`](img/logo.png) (512×512) |
-| GitHub link | ✅ | https://github.com/bilgin-kocak/fermata (make sure `main` is the default branch) |
-| Video (2–3 min) | ⏳ | storyboard + voice-over in [`DEMO.md`](DEMO.md); raw clips via `scripts/record/`; **TODO (Bilgin): record VO, edit, upload, paste link** |
-| 3-minute demo | ⏳ | same video; the live part follows DEMO.md's "live single call" script |
+| GitHub link | ✅ | https://github.com/bilgin-kocak/fermata (`main` is the default branch) |
+| Presentation video (2–3 min) | ✅ | https://www.loom.com/share/35084c15407244d8b9e91c1d69b220b3 (script: [`PITCH.md`](PITCH.md)) |
+| Product-demo video (≤ 3 min) | ✅ | https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9 (recorded on the live demo; script: [`DEMO.md`](DEMO.md)) |
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
 | Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores and List your API. Through it: 100 paid calls → 96 released / 4 refunded, 0 errors (5.4 s per call); `demo:mcp` 6/6; `deploy/smoke.sh` 7/7. |
-| Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides; downloads as PPTX/PDF). **It is private until Bilgin shares it** from the page's Share menu. Its speaker notes are the script for the separate 2–3 minute pitch video. |
+| Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides; downloads as PPTX/PDF). **It is private until Bilgin shares it** from the page's Share menu. The presentation video is spoken over it ([`PITCH.md`](PITCH.md)). |
 
 ## Description
 
@@ -121,7 +121,7 @@ The hosted testnet demo lets judges try all three without a wallet.
 - [x] `bash scripts/demo-stack.sh up --chain moderato && pnpm demo:cases --chain moderato` →
       3/3 PASS with explorer links (2026-10-01; links and escrow address above and in the README).
 - [x] `pnpm demo:load --calls 100 --chain moderato` → 96/4, 0 errors (the recorded footage is Anvil; keep its caption).
-- [ ] ✍️ Video recorded, edited, uploaded; link pasted above.
+- [x] Both videos recorded, uploaded and linked above.
 - [ ] `main` is the default branch on GitHub; README renders (Mermaid diagrams, logo).
 - [ ] Claims audit: nothing in the README, video or this form claims more than the v1 trust model.
 - [ ] Freeze respected (2026-10-09).

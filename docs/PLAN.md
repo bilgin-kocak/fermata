@@ -287,7 +287,7 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
 - [x] **Pitch deck (2026-10-02):** 10 slides in a Claude Slides artifact, linked from SUBMISSION.
   - It leads with the Moderato numbers.
   - The economics slide uses the measured 66 MB per proof at an assumed $0.09/GB, the 5 % sampled-proving cost, and the 1 − (1 − p·f)^n detection probability.
-  - The speaker notes are the pitch-video script.
+  - The pitch-video script is [`PITCH.md`](PITCH.md), spoken over the deck (it supersedes the older speaker notes).
 - [x] **Vendor scores, public demo and onboarding (2026-10-02).**
   - SDK aggregator (Wilson bound) plus `pnpm scores`, `/scores`, the Vendors tab and the MCP `fermata_vendor_scores`.
   - Public mode: `/demo/*` with limits, the faucet balance guard and the Try it panel.
@@ -306,9 +306,12 @@ Chosen from the research list (pitch, outreach and deck stay with Bilgin):
   - `probe-tls.sh api.coinbase.com /v2/prices/BTC-USD/spot`: PASS.
 - [x] Hosted on Railway (2026-10-05): https://fermata-production-9378.up.railway.app/dashboard/. Own fresh testnet keys, volume for state; smoke 7/7, a
   100-call run through it 96/4 with 0 errors, demo:mcp 6/6. Live URL in README and SUBMISSION.
-- [ ] Add the live URL to the deck (Bilgin).
-- [ ] Pitch video, recorded by Bilgin from the deck's speaker notes. The rules (secondary source)
-  ask for a pitch video separate from the demo video.
+- [x] Deck updated (2026-10-05): live URL on the cover and the ask, the real `fermata(...)` call, the
+  receipts row aligned with the README. Still private until Bilgin shares it.
+- [x] Video scripts (2026-10-05): presentation [`PITCH.md`](PITCH.md) (≈ 2:25 over the deck at 130 wpm), product demo
+  [`DEMO.md`](DEMO.md) (≈ 2:45 on the live demo); checked by a claims audit and a judge-style review.
+- [x] Both videos recorded (2026-10-06): [pitch](https://www.loom.com/share/35084c15407244d8b9e91c1d69b220b3), [demo](https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9). From those scripts (Colosseum asks for both: a 2–3 min
+  presentation and a product demo of at most 3 min).
 
 ## Reused from WebProof (bilgin-kocak/webproof-solana @ 609a654, Apache-2.0)
 
