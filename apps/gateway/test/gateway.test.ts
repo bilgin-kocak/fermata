@@ -8,7 +8,7 @@ import { McpClient } from 'mppx/mcp/client'
 import { Client as McpSdkClient } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { encodeAbiParameters, encodeEventTopics, keccak256, toHex, type Address, type Hex } from 'viem'
-import { fermataEscrowAbi, fermataMethod, originHash, requestHash, serviceId as makeServiceId } from '@fermata/sdk'
+import { fermataEscrowAbi, fermataMethod, originHash, requestHash, serviceId as makeServiceId } from 'fermata-sdk'
 import { createGateway } from '../src/app.ts'
 import type { AttestInput, AttestResult, Attestor } from '../src/attestor.ts'
 import type { GatewayChain, TxResult } from '../src/chain.ts'
@@ -62,11 +62,11 @@ class FakeChain implements GatewayChain {
     this.holds.get(callId.toLowerCase())!.status = 4
     return { ok: true, txHash: keccak256(toHex(`timeout-${callId}`)) }
   }
-  scoringLogs: import('@fermata/sdk').EscrowLog[] = []
+  scoringLogs: import('fermata-sdk').EscrowLog[] = []
   async escrowLogs(fromBlock: bigint) {
     const settledLogs = this.settled.map((x) => ({
       eventName: x.outcome === 1 ? 'Released' : 'Refunded', blockNumber: 2n, transactionHash: keccak256(toHex(`settle-${x.callId}`)), args: { callId: x.callId, serviceId: sid },
-    })) as import('@fermata/sdk').EscrowLog[]
+    })) as import('fermata-sdk').EscrowLog[]
     return { logs: [...this.scoringLogs, ...settledLogs].filter((l) => l.blockNumber >= fromBlock), toBlock: 100n }
   }
   /** A stranger's transfer that reuses the call's memo (anyone can send one). */

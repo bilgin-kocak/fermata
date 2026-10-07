@@ -21,6 +21,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
 | Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores and List your API. Through it: 100 paid calls → 96 released / 4 refunded, 0 errors (5.4 s per call); `demo:mcp` 6/6; `deploy/smoke.sh` 7/7. |
+| npm packages | ✅ | [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp): `claude mcp add fermata -- npx -y fermata-mcp` gives Claude pay-on-proof tools on the live demo, with no setup (it creates and funds a testnet wallet). [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk): the `fermata` MPP payment method for agents and servers. Both MIT. |
 | Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides); a PPTX copy is in the repo: [`fermata-pitch-deck.pptx`](fermata-pitch-deck.pptx). **It is private until Bilgin shares it** from the page's Share menu. The presentation video is spoken over it ([`PITCH.md`](PITCH.md)). |
 
 ## Form fields (copy-paste)
@@ -43,7 +44,7 @@ Why now: agent payments went live this year. MPP, co-authored by Stripe and Temp
 
 First customers: API vendors already selling to agents over MPP or x402 (data, search, enrichment, inference and tool APIs priced per call). The wedge is trust they don't have to build: an agent can safely pay a vendor it has never seen, because a failed call is refunded by rule. For the vendor it is a conversion argument, not a cost: they register once, and their API doesn't change.
 
-Distribution: Fermata sits where agents already pay. MPP clients add the `fermata` payment method; MCP agents such as Claude get pay-on-proof tools with one `claude mcp add`; vendors list themselves through self-serve onboarding ("List your API") and appear on a public scoreboard computed from on-chain events. Each verdict improves that scoreboard, which agents can read before choosing a vendor.
+Distribution: Fermata sits where agents already pay. MPP clients add the `fermata` payment method from the fermata-sdk npm package; MCP agents such as Claude get pay-on-proof tools with one command, `claude mcp add fermata -- npx -y fermata-mcp`, with no wallet setup; vendors list themselves through self-serve onboarding ("List your API") and appear on a public scoreboard computed from on-chain events. Each verdict improves that scoreboard, which agents can read before choosing a vendor.
 
 Business model: 0.5 % of released payments, set on-chain, nothing on refunds, so Fermata earns only when the vendor gets paid. At scale, sampled proving (a random 5 % of calls) and session escrow bring the proving cost under one-cent calls; this is on the roadmap, not built.
 
@@ -79,7 +80,7 @@ Agents add the `fermata` method to their `mppx` client
 (`fermata({ wallet, client, escrows, trustedVerifiers })`, the last two being their own allow-lists);
 vendors register a service and keep their API unchanged. For services that configure it, the gateway
 also offers plain `tempo` payments, tagged `unprotected`, so existing MPP clients can still pay them. MCP agents such as Claude get the same
-protection as tools: one `claude mcp add` gives Claude pay-on-proof APIs.
+protection as tools: one command, `claude mcp add fermata -- npx -y fermata-mcp`, gives Claude pay-on-proof APIs.
 
 Trust model (v1), stated plainly: the escrow trusts one verifier key per service, held by
 Fermata; the notary is a separate, blind process that we run in the demo. A vendor trusts
@@ -119,8 +120,8 @@ The hosted testnet demo lets judges try all three without a wallet.
   released and npm's real 404 refunded, about 2 s per proof (`pnpm demo:real`, FACTS §15.6).
   Coinbase spot price is wired up for a local run.
 - **MPP over MCP.** The gateway's `/mcp` endpoint exposes every service as a paid MCP tool, using
-  mppx's MCP transport with the `fermata` method. `fermata-mcp` lets Claude Code or Claude Desktop
-  pay those tools from a testnet wallet, with the agent's own allow-lists and a spending cap. In a
+  mppx's MCP transport with the `fermata` method. `fermata-mcp` (on npm) lets Claude Code or Claude
+  Desktop pay those tools from a testnet wallet, with the agent's own allow-lists and a spending cap. In a
   real headless Claude Code session, Claude bought two quotes: one released, and a proven HTTP 500
   refunded. It then re-verified the proof (`apps/mcp/README.md`).
 - **Stablecoin gas.** Agents pay gas in the same TIP-20 stablecoin (pathUSD on testnet); the demo's
@@ -156,7 +157,7 @@ The hosted testnet demo lets judges try all three without a wallet.
 - [x] Location filled in above.
 - [x] `bash scripts/demo-stack.sh up --chain moderato && pnpm demo:cases --chain moderato` →
       3/3 PASS with explorer links (2026-10-01; links and escrow address above and in the README).
-- [x] `pnpm demo:load --calls 100 --chain moderato` → 96/4, 0 errors (the recorded footage is Anvil; keep its caption).
+- [x] `pnpm demo:load --calls 100 --chain moderato` → 96/4, 0 errors.
 - [x] Both videos recorded, uploaded and linked above.
 - [ ] `main` is the default branch on GitHub; README renders (Mermaid diagrams, logo).
 - [ ] Claims audit: nothing in the README, video or this form claims more than the v1 trust model.

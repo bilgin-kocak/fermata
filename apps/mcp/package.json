@@ -1,26 +1,60 @@
 {
-  "name": "@fermata/mcp",
+  "name": "fermata-mcp",
+  "version": "0.1.1",
+  "description": "Pay-on-proof tools for Claude and other MCP agents: a local MCP server that pays a Fermata gateway's tools from a Tempo testnet wallet, released only on a TLSNotary proof, refunded on failure.",
   "license": "MIT",
-  "version": "0.0.0",
-  "private": true,
   "type": "module",
-  "description": "Fermata for MCP agents (Claude Code, Claude Desktop, …): a local stdio MCP server that pays a Fermata gateway's tools with the agent's testnet wallet — escrowed, released only on a TLSNotary proof, refunded on failure",
+  "keywords": [
+    "tempo",
+    "mpp",
+    "tlsnotary",
+    "escrow",
+    "ai-agents",
+    "agent-payments",
+    "stablecoin",
+    "mcp",
+    "x402",
+    "claude",
+    "model-context-protocol"
+  ],
+  "homepage": "https://github.com/bilgin-kocak/fermata/tree/main/apps/mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bilgin-kocak/fermata.git",
+    "directory": "apps/mcp"
+  },
+  "bugs": "https://github.com/bilgin-kocak/fermata/issues",
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "fermata-mcp": "src/index.ts"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "bin": {
+      "fermata-mcp": "./dist/index.js"
+    }
+  },
   "scripts": {
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@fermata/sdk": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.31.0",
-    "mppx": "0.11.0",
-    "viem": "^2.56.8"
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "prepack": "pnpm run build"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@types/node": "^22.19.0",
+    "esbuild": "0.28.2",
+    "fermata-sdk": "workspace:^",
+    "mppx": "0.11.0",
     "tsx": "^4.23.15",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "viem": "^2.56.8"
   }
 }

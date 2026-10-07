@@ -5,7 +5,7 @@ import { Receipt } from 'mppx'
 import { Mppx } from 'mppx/client'
 import { createPublicClient, createWalletClient, http, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { fermata, tempoChain, tip20Abi, TOKENS } from '@fermata/sdk'
+import { fermata, tempoChain, tip20Abi, TOKENS } from 'fermata-sdk'
 import { loadDotEnv, parseArgs } from '../lib/args.ts'
 
 loadDotEnv()

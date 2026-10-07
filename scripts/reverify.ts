@@ -16,7 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createPublicClient, http, keccak256, parseEventLogs, type Address, type Hex } from 'viem'
-import { escrowDeployment, fermataEscrowAbi, getService, MODERATO, originHash, predicateHash, tempoChain } from '@fermata/sdk'
+import { escrowDeployment, fermataEscrowAbi, getService, MODERATO, originHash, predicateHash, tempoChain } from 'fermata-sdk'
 import { loadDotEnv, parseArgs } from './lib/args.ts'
 
 const LIVE = 'https://fermata-production-9378.up.railway.app'

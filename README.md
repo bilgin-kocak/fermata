@@ -79,8 +79,8 @@ sequenceDiagram
 | [`contracts/src/FermataEscrow.sol`](contracts/src/FermataEscrow.sol) | `hold → settle(verdict) \| claimTimeout`. Per-call holds pulled with a TIP-20 permit; `…WithMemo` transfers with memo = callId; EIP-712 verdicts from one registered verifier per service; service pins the origin, the notary key hash and the predicate hash; 0.5 % fee on release. |
 | [`apps/attestor`](apps/attestor) | `fermata-attest` (Rust, TLSNotary `v0.1.0-alpha.15`): `notary` (the blind MPC-TLS co-signer), `prove`, `verify` (binding checks + predicate + EIP-712 signing), `verify --offline` (anyone, no key), `serve` (HTTP API for the gateway). |
 | [`apps/gateway`](apps/gateway) | The MPP server agents pay. Offers `fermata` (escrowed, pay on proof) in every challenge, plus plain `tempo` (direct, tagged `unprotected`) for services that configure it; settles, then responds; a sweeper claims expired holds. Serves `/proofs/:callId`, `/calls`, `/events`, `/reconcile/:callId`, `/openapi.json`, `/llms.txt`, the dashboard, and **`/mcp`**: every service as a paid MCP tool. |
-| [`packages/sdk`](packages/sdk) | `fermata({ wallet, client, escrows, trustedVerifiers })` for `mppx/client`, `fermataServer()` for `mppx/server`, escrow bindings, `reconcile` (movements by memo), `reclaim`. |
-| [`apps/mcp`](apps/mcp) | `fermata-mcp`: the stdio MCP server an agent such as Claude launches. It pays the gateway's MCP tools from the agent's testnet wallet, with your own allow-lists and a spending cap. |
+| [`packages/sdk`](packages/sdk) | npm [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk): `fermata({ wallet, client, escrows, trustedVerifiers })` for `mppx/client`, `fermataServer()` for `mppx/server`, escrow bindings, `reconcile` (movements by memo), `reclaim`. |
+| [`apps/mcp`](apps/mcp) | npm [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp): the stdio MCP server an agent such as Claude launches. It pays the gateway's MCP tools from the agent's testnet wallet, with your own allow-lists and a spending cap. |
 | [`apps/dashboard`](apps/dashboard) | Live Held/Released/Refunded feed, per-call proof drawer with offline re-verify, reconciliation by memo. Light/dark, works on a phone. |
 | [`apps/vendor`](apps/vendor) | Demo quote API (TLS 1.2) with failure modes: 500, truncated JSON, cut connection, hang, random `CHAOS_RATE`. |
 
@@ -91,7 +91,7 @@ own allow-lists: it never pays into an escrow or a verifier just because a gatew
 import { Mppx } from 'mppx/client'
 import { createPublicClient, createWalletClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { fermata, tempoChain } from '@fermata/sdk'
+import { fermata, tempoChain } from 'fermata-sdk'
 
 const chain = tempoChain('https://rpc.moderato.tempo.xyz')
 const wallet = createWalletClient({ account: privateKeyToAccount(AGENT_KEY), chain, transport: http() })
@@ -116,7 +116,7 @@ Transcript and setup: [`apps/mcp/README.md`](apps/mcp/README.md). `pnpm demo:mcp
 as a script (6/6 PASS on Anvil).
 
 ```sh
-claude mcp add fermata -e FERMATA_AGENT_KEY=0x… -e FERMATA_TRUSTED_VERIFIERS=0x… … -- tsx apps/mcp/src/index.ts
+claude mcp add fermata -- npx -y fermata-mcp   # the live demo, from a testnet wallet it creates and funds
 ```
 
 ## The product: pay on proof, vendor scores, self-serve onboarding
@@ -331,6 +331,36 @@ Comparison checked against each project's public repository or specification on 
 - **`session` intent for streaming APIs** — per-chunk holds for streamed and long-running responses.
 - **Stripe method for fiat vendors** — a `stripe` MPP method behind a flag, for vendors paid in fiat.
 
+## Use it in your project
+
+Two npm packages, MIT licensed, for Tempo Moderato testnet:
+
+| Package | For | Start |
+|---|---|---|
+| [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp) ([docs](apps/mcp/README.md)) | Claude Code, Claude Desktop, any MCP client | `claude mcp add fermata -- npx -y fermata-mcp` |
+| [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk) ([docs](packages/sdk/README.md)) | TypeScript agents and servers on [mppx](https://github.com/wevm/mppx) | `npm install fermata-sdk mppx@~0.11.0 viem` |
+
+With no settings, `fermata-mcp` pays the live demo's tools from a testnet wallet it creates in
+`~/.fermata/agent-key` and funds from Tempo's testnet faucet. `fermata-sdk` adds the `fermata`
+payment method to an mppx client, so an agent's paid `fetch` is held in escrow and settled on proof:
+
+```ts
+const mppx = Mppx.create({
+  methods: [
+    fermata({
+      wallet,
+      client,
+      escrows: [escrowDeployment('moderato')!.address],
+      trustedVerifiers: ['0xb8718ad26e9ae0058b8b1a369295b374d99af599'], // the live demo's verifier
+    }),
+  ],
+  polyfill: false,
+})
+const res = await mppx.fetch(paidApiUrl) // released to the vendor on proof, or refunded to you
+```
+
+The full example, the server side and the trust model: [`packages/sdk/README.md`](packages/sdk/README.md).
+
 ## Quickstart
 
 Requires Foundry 1.8.3, Node ≥ 22.21, pnpm 10, `jq`, OpenSSL ≥ 1.1.1 (not LibreSSL; for the dev certificates) and (for the attestor) Rust 1.95.0 via rustup. `pnpm dev` starts the whole stack on a local Tempo emulation.
@@ -374,13 +404,13 @@ build environment); the scripts above are the tested path.
 
 All milestones done: escrow contract, attestor, gateway + `fermata` MPP method + SDK, demo stack
 + dashboard, submission material ([`docs/DEMO.md`](docs/DEMO.md),
-[`docs/SUBMISSION.md`](docs/SUBMISSION.md), [`SECURITY.md`](SECURITY.md)). Left: the video.
+[`docs/SUBMISSION.md`](docs/SUBMISSION.md), [`SECURITY.md`](SECURITY.md)), both videos (linked at the top),
+and the SDK and MCP server packaged for npm ([Use it in your project](#use-it-in-your-project)).
 
 **Tempo Moderato: done** (2026-10-01). Escrow deployed, `escrow:roundtrip`, gateway e2e (4/4),
 `demo:cases` (3/3) and the 100-call `demo:load` all pass on Moderato; the `mppx validate` payment
 phase passes too (88 passed, 0 failed; 4 warnings are the vendor's 404 for a quote request with no
-`?symbol=`). The recorded video footage is from Anvil's Tempo emulation and is captioned as such.
-Nothing is faked; see [`docs/PLAN.md`](docs/PLAN.md).
+`?symbol=`). The product demo video is recorded on the live demo on Moderato. Nothing is faked; see [`docs/PLAN.md`](docs/PLAN.md).
 
 **Freeze:** the demo, the video and this README are frozen from **2026-10-09** (72 h before the
 2026-10-12 deadline). After the freeze, only bug fixes that a failing `pnpm demo:cases` justifies.

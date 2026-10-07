@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { Address, Hex } from 'viem'
-import { escrowDeployment } from '@fermata/sdk'
+import { escrowDeployment } from 'fermata-sdk'
 
 export type ServiceConfig = {
   serviceId: Hex

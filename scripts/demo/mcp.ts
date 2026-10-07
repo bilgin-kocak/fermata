@@ -8,7 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createWalletClient, http, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { feesPaid, tip20Abi } from '@fermata/sdk'
+import { feesPaid, tip20Abi } from 'fermata-sdk'
 import { chain, client, stack, table, TOKEN } from './lib.ts'
 
 // ---------------------------------------------------------------- a fresh agent wallet, funded

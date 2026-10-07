@@ -18,11 +18,12 @@ Two parts:
   `_meta["org.paymentauth/credential"]`. The gateway then runs the same hold → prove → verdict →
   settle pipeline as the HTTP route. The tool result carries the vendor's answer, the outcome, and
   `_meta["org.fermata/call"]` (callId, status, hold/settle tx, presentation hash); the MPP receipt
-  goes in `_meta["org.paymentauth/receipt"]`. Three free tools: `fermata_call`, `fermata_verify`
+  goes in `_meta["org.paymentauth/receipt"]`. Four free tools: `fermata_vendor_scores` (each
+  vendor's proven delivery record, from the escrow's events), `fermata_call`, `fermata_verify`
   (offline re-verification against the chain), `fermata_reconcile` (TIP-20 movements by memo).
 - **`fermata-mcp`** (this package, stdio): the process the agent launches. It holds the agent's
-  testnet key, connects to the gateway's `/mcp` with `McpClient.wrap(…, [fermata({ … })])` from
-  `mppx/mcp/client`, and re-exposes the tools. It adds `fermata_wallet`.
+  testnet key, connects to the gateway's `/mcp` with `McpClient.wrap(client, { methods: [fermata({ … })] })`
+  from `mppx/mcp/client`, and re-exposes the tools. It adds `fermata_wallet`.
 
 Before any money moves, `fermata-mcp` checks, in the SDK's `fermata()` client:
 
@@ -35,8 +36,29 @@ It also runs a spending guard: a per-call cap (`FERMATA_MAX_PRICE`) and a per-se
 
 ## Use it from Claude Code
 
+One line, no settings: it pays the public live demo on Tempo Moderato testnet from a testnet wallet
+it creates in `~/.fermata/agent-key` (readable only by you) and funds from the testnet faucet:
+
 ```sh
-bash scripts/demo-stack.sh up --chain anvil          # or a gateway on Moderato
+claude mcp add fermata -- npx -y fermata-mcp
+```
+
+Then ask Claude, for example: *"Get the BTC price with get_quote_reliable, then try get_quote_broken,
+and verify both calls."* One call is released to the vendor, the other refunded on its proven 500.
+
+Claude Desktop: add to `claude_desktop_config.json`
+
+```json
+{ "mcpServers": { "fermata": { "command": "npx", "args": ["-y", "fermata-mcp"] } } }
+```
+
+The automatic wallet is only created on chain 42431: Tempo Moderato testnet, or a local Anvil emulation
+of it, which has no faucet (set `FERMATA_AGENT_KEY` there). To use your own key, another
+gateway, or a local stack, set the variables below (`claude mcp add fermata -e NAME=value … -- npx -y fermata-mcp`).
+For example, from this repository against a local stack:
+
+```sh
+bash scripts/demo-stack.sh up --chain anvil
 claude mcp add fermata \
   -e FERMATA_GATEWAY=http://127.0.0.1:4300 \
   -e FERMATA_AGENT_KEY=0x…                      `# a funded TESTNET key, never a mainnet key` \
@@ -46,18 +68,18 @@ claude mcp add fermata \
   -- "$PWD/node_modules/.bin/tsx" "$PWD/apps/mcp/src/index.ts"
 ```
 
-On Moderato, set `TEMPO_RPC_URL=https://rpc.moderato.tempo.xyz` and point `FERMATA_GATEWAY` at a
-gateway started with `--chain moderato`. `FERMATA_ESCROW` then defaults to the Moderato deployment
-in `packages/sdk/src/deployments.json`. Claude Desktop takes the same command and env in its
-`mcpServers` config.
+For your own gateway on Moderato (`--chain moderato`), set `FERMATA_GATEWAY` and
+`FERMATA_TRUSTED_VERIFIERS`; the RPC and `FERMATA_ESCROW` already default to Moderato and its
+deployment in `packages/sdk/src/deployments.json`. Claude Desktop takes the same command and env in
+its `mcpServers` config.
 
 | Env | Default | |
 |---|---|---|
-| `FERMATA_GATEWAY` | `http://127.0.0.1:4300` | gateway base URL (`/mcp` is appended) |
-| `FERMATA_AGENT_KEY` | — (required) | the agent's testnet private key |
+| `FERMATA_GATEWAY` | the live demo | gateway base URL (`/mcp` is appended) |
+| `FERMATA_AGENT_KEY` | a testnet wallet in `~/.fermata/agent-key`, created only on chain 42431 (Moderato) and funded from its faucet | the agent's testnet private key |
 | `TEMPO_RPC_URL` | `https://rpc.moderato.tempo.xyz` | |
 | `FERMATA_ESCROW` | `deployments.json` for `FERMATA_NETWORK` (`moderato`) | escrow(s) you accept, comma-separated |
-| `FERMATA_TRUSTED_VERIFIERS` | — (required) | verifier address(es) you accept |
+| `FERMATA_TRUSTED_VERIFIERS` | the live demo's verifier, for the live demo only; otherwise required | verifier address(es) you accept, never taken from the gateway |
 | `FERMATA_MAX_PRICE` | `100000` (0.10) | max price per call, token base units |
 | `FERMATA_BUDGET` | `1000000` (1.00) | max total held per session |
 

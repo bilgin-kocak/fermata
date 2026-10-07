@@ -7,7 +7,7 @@
 // the chain: prove time, MPC bandwidth per call and gas per call, and writes out/demo/load-<chain>.json.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { parseEventLogs, type Hex } from 'viem'
-import { feesPaid, fermataEscrowAbi, tip20Abi } from '@fermata/sdk'
+import { feesPaid, fermataEscrowAbi, tip20Abi } from 'fermata-sdk'
 import { args, client, fundedAgent, gw, link, receiptOf, short, stack, table, TOKEN } from './lib.ts'
 
 const calls = Number(args.calls ?? 10)

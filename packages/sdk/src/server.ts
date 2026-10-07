@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { Challenge, Errors, Method, Store } from 'mppx'
 import { isAddressEqual, parseEventLogs, toHex, type Address, type Hex, type PublicClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
@@ -35,13 +34,13 @@ export type FermataServerOptions = {
  * - `broadcast` claims the callId once (replay protection) and returns the receipt.
  * Every rejection is a `VerificationFailedError` (HTTP 402), never a 500.
  */
-export function fermataServer({ client, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000 }: FermataServerOptions) {
+export function fermataServer({ client, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000 }: FermataServerOptions): Method.Server<typeof fermataMethod> {
   const tries = Math.max(1, Math.round(lagToleranceMs / 500))
   return Method.toServer(fermataMethod, {
     request({ credential, request }) {
       const signedByUs = !!credential && Challenge.verify(credential.challenge, { secretKey })
       const echoed = signedByUs ? (credential.challenge.request as { callId?: string }).callId : undefined
-      return { ...request, callId: echoed ?? toHex(randomBytes(32)) }
+      return { ...request, callId: echoed ?? toHex(crypto.getRandomValues(new Uint8Array(32))) }
     },
     stableBinding: (r) => ({
       amount: r.amount,

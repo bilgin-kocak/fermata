@@ -33,7 +33,7 @@ import {
   serviceId,
   TOKENS,
   type Verdict,
-} from '@fermata/sdk'
+} from 'fermata-sdk'
 import { memoMovements, signPermit, tempoChain, tip20Abi } from './lib/tempo.ts'
 
 const env = (name: string) => {

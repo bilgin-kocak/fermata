@@ -4,7 +4,7 @@
 //   2 verified-failure refund  vendor answers an authenticated 500 → proof fails → agent refunded
 //   3 timeout refund           vendor never answers → no verdict → after the window, refunded
 import { keccak256, parseEventLogs, zeroHash, type Hex } from 'viem'
-import { fermataEscrowAbi } from '@fermata/sdk'
+import { fermataEscrowAbi } from 'fermata-sdk'
 import { client, fundedAgent, gw, link, receiptOf, short, sleep, stack, table } from './lib.ts'
 
 type Result = { case: string; pass: boolean; outcome: string; callId: string; txs: string[]; notes: string[] }

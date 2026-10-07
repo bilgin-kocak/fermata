@@ -51,7 +51,7 @@ function oneAtATime<T>(key: string, task: () => Promise<T>): Promise<T> {
   return run
 }
 
-export function fermata(opts: FermataClientOptions) {
+export function fermata(opts: FermataClientOptions): Method.Client<typeof fermataMethod> {
   return Method.toClient(fermataMethod, {
     async createCredential({ challenge }) {
       const r = challenge.request

@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fermata/sdk": "workspace:*",
+    "fermata-sdk": "workspace:*",
     "@hono/node-server": "2.1.1",
     "@modelcontextprotocol/sdk": "1.31.0",
     "hono": "4.13.8",

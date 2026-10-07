@@ -12,9 +12,9 @@
     "dev": "bash scripts/demo-stack.sh up --chain anvil",
     "contracts:build": "cd contracts && forge build",
     "contracts:test": "cd contracts && forge test && FOUNDRY_PROFILE=tempo forge test --network tempo",
-    "sdk:test": "pnpm -F @fermata/sdk test",
+    "sdk:test": "pnpm -F fermata-sdk test",
     "test": "pnpm contracts:test && pnpm sdk:test",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -F @fermata/sdk typecheck && pnpm -F @fermata/gateway typecheck && pnpm -F @fermata/mcp typecheck",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -F fermata-sdk typecheck && pnpm -F @fermata/gateway typecheck && pnpm -F fermata-mcp typecheck",
     "keys:init": "tsx scripts/keys-init.ts",
     "escrow:deploy": "bash scripts/deploy-escrow.sh",
     "escrow:roundtrip": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/escrow-roundtrip.ts",
@@ -38,7 +38,7 @@
     "reverify": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=UNDICI-EHPA tsx scripts/reverify.ts"
   },
   "devDependencies": {
-    "@fermata/sdk": "workspace:*",
+    "fermata-sdk": "workspace:*",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@types/node": "^22.19.0",
     "mppx": "0.11.0",

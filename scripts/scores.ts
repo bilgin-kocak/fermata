@@ -7,7 +7,7 @@
 // services settled by that verifier, as the gateway does with its own attestor (shown on /scores).
 import { existsSync, readFileSync } from 'node:fs'
 import { createPublicClient, http, type Address } from 'viem'
-import { aggregateScores, escrowDeployment, fetchEscrowLogs, serviceLabelOf, tempoChain } from '@fermata/sdk'
+import { aggregateScores, escrowDeployment, fetchEscrowLogs, serviceLabelOf, tempoChain } from 'fermata-sdk'
 import { chainArg, loadDotEnv, parseArgs, rpcFor } from './lib/args.ts'
 import { toJson } from './lib/tempo.ts'
 

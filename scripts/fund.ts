@@ -4,7 +4,7 @@
 // and prints each address with its pathUSD balance. Testnet only: the faucet mints test tokens.
 import { createPublicClient, http, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { tempoChain, tip20Abi, TOKENS } from '@fermata/sdk'
+import { tempoChain, tip20Abi, TOKENS } from 'fermata-sdk'
 import { chainArg, loadDotEnv, parseArgs, rpcFor } from './lib/args.ts'
 
 loadDotEnv()

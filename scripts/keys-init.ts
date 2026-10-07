@@ -6,7 +6,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { isHex, size, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { MODERATO } from '@fermata/sdk'
+import { MODERATO } from 'fermata-sdk'
 
 const root = new URL('../', import.meta.url)
 const envUrl = new URL('.env', root)

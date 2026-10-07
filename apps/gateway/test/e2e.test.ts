@@ -11,7 +11,7 @@ import { Receipt } from 'mppx'
 import { Mppx } from 'mppx/client'
 import { createPublicClient, createWalletClient, http, isAddressEqual, keccak256, parseEventLogs, zeroHash, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { fermata, fermataEscrowAbi, reconcile, tempoChain, tip20Abi, TOKENS } from '@fermata/sdk'
+import { fermata, fermataEscrowAbi, reconcile, tempoChain, tip20Abi, TOKENS } from 'fermata-sdk'
 
 const env = (k: string) => {
   const v = process.env[k]

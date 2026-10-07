@@ -3,15 +3,15 @@
 // -32042, mppx's MCP transport); the agent holds the price in the escrow and retries with the
 // credential in `_meta["org.paymentauth/credential"]`; the gateway then proves the vendor's answer
 // with TLSNotary and settles exactly as on the HTTP route — release on DELIVERED, refund on FAILED,
-// timeout refund when there is no transcript. Three free tools expose the call record, the offline
-// re-verification and the reconciliation by memo.
+// timeout refund when there is no transcript. Four free tools expose the vendor scores, the call
+// record, the offline re-verification and the reconciliation by memo.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { Hono } from 'hono'
 import { Credential, Mcp } from 'mppx'
 import { Mppx, Transport } from 'mppx/server'
-import { requestHash } from '@fermata/sdk'
+import { requestHash } from 'fermata-sdk'
 import type { Hex } from 'viem'
 import type { CallRecord } from './store.ts'
 

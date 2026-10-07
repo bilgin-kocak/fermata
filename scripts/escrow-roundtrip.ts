@@ -43,7 +43,7 @@ import {
   signVerdict,
   TOKENS,
   type Verdict,
-} from '@fermata/sdk'
+} from 'fermata-sdk'
 import { chainArg, loadDotEnv, parseArgs, rpcFor } from './lib/args.ts'
 import { feesPaid, memoMovements, signPermit, tempoChain, tip20Abi, toJson, type Movement } from './lib/tempo.ts'
 

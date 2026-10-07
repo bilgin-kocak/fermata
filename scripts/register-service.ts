@@ -19,7 +19,7 @@ import {
   serviceId,
   tempoChain,
   TOKENS,
-} from '@fermata/sdk'
+} from 'fermata-sdk'
 import { chainArg, loadDotEnv, parseArgs, rpcFor } from './lib/args.ts'
 
 loadDotEnv()

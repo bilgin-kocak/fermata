@@ -9,7 +9,7 @@ import {
   type Transport,
   type WalletClient,
 } from 'viem'
-import { fermataEscrowAbi, fetchEscrowLogs, getHold, getService, reconcile, type EscrowLog, type Verdict } from '@fermata/sdk'
+import { fermataEscrowAbi, fetchEscrowLogs, getHold, getService, reconcile, type EscrowLog, type Verdict } from 'fermata-sdk'
 
 export type TxResult = { ok: true; txHash: Hex } | { ok: false; error: string; txHash?: Hex }
 
