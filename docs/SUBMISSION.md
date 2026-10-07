@@ -35,6 +35,8 @@ Fermata is pay on proof for AI agents. When an agent pays an API per call (MPP o
 
 **Invite teammates:** none (solo).
 
+**X / launch post** (for an X or social field, or the traction section): https://x.com/KocakBilgin/status/2107918056542601333
+
 ## Description
 
 AI agents already pay for APIs per call over HTTP 402 (MPP, x402). What they can't do is get their
