@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Exception: apps/attestor is licensed under the Apache License, Version 2.0
-(see apps/attestor/Cargo.toml), because it ports code from WebProof
-(github.com/bilgin-kocak/webproof-solana), which is Apache-2.0.
