@@ -23,6 +23,18 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores and List your API. Through it: 100 paid calls → 96 released / 4 refunded, 0 errors (5.4 s per call); `demo:mcp` 6/6; `deploy/smoke.sh` 7/7. |
 | Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides); a PPTX copy is in the repo: [`fermata-pitch-deck.pptx`](fermata-pitch-deck.pptx). **It is private until Bilgin shares it** from the page's Share menu. The presentation video is spoken over it ([`PITCH.md`](PITCH.md)). |
 
+## Form fields (copy-paste)
+
+**Project name:** Fermata
+
+**Category:** Payments (if the list has no Payments: Infrastructure; AI is the second choice)
+
+**Brief description** (410 / 500 characters):
+
+Fermata is pay on proof for AI agents. When an agent pays an API per call (MPP or x402), the payment is held in escrow on Tempo. TLSNotary records exactly what the vendor's server answered. If that record passes the delivery rule pinned on-chain, the vendor is paid; a proven failure, or no answer in time, refunds the agent automatically. Every movement carries the call ID as its memo. Live on Tempo testnet.
+
+**Invite teammates:** none (solo).
+
 ## Description
 
 AI agents already pay for APIs per call over HTTP 402 (MPP, x402). What they can't do is get their
