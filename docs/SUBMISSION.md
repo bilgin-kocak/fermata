@@ -37,6 +37,28 @@ Fermata is pay on proof for AI agents. When an agent pays an API per call (MPP o
 
 **X / launch post** (for an X or social field, or the traction section): https://x.com/KocakBilgin/status/2107918056542601333
 
+**Go-to-market strategy, demand validation and distribution** (paste-ready):
+
+Why now: agent payments went live this year. MPP, co-authored by Stripe and Tempo, launched with Tempo mainnet in March 2026, and its directory already lists over a hundred paid services. Agents now pay per call before the answer arrives, and MPP's own docs leave refunds "up to your service", so there is no chargeback for machines.
+
+First customers: API vendors already selling to agents over MPP or x402 (data, search, enrichment, inference and tool APIs priced per call). The wedge is trust they don't have to build: an agent can safely pay a vendor it has never seen, because a failed call is refunded by rule. For the vendor it is a conversion argument, not a cost: they register once, and their API doesn't change.
+
+Distribution: Fermata sits where agents already pay. MPP clients add the `fermata` payment method; MCP agents such as Claude get pay-on-proof tools with one `claude mcp add`; vendors list themselves through self-serve onboarding ("List your API") and appear on a public scoreboard computed from on-chain events. Each verdict improves that scoreboard, which agents can read before choosing a vendor.
+
+Business model: 0.5 % of released payments, set on-chain, nothing on refunds, so Fermata earns only when the vendor gets paid. At scale, sampled proving (a random 5 % of calls) and session escrow bring the proving cost under one-cent calls; this is on the roadmap, not built.
+
+Demand validation so far: a public live demo on Tempo testnet that anyone can try without a wallet (100 paid calls through it: 96 released, 4 refunded, 0 errors), real third-party APIs proven (the npm registry), and a public launch thread on X (https://x.com/KocakBilgin/status/2107918056542601333). [Add any replies, vendor conversations or pilot interest here as numbers; if none yet, keep this sentence:] There are no paying users yet; the next step is pilot conversations with vendors listed in the MPP directory.
+
+**Prior work and third-party code** (paste-ready):
+
+Fermata was built during the hackathon: the repository's first commit is September 23, 2026, after the September 14 start. Everything in it was written during the competition except the following.
+
+My own prior work: WebProof (github.com/bilgin-kocak/webproof-solana, created and last updated on August 12–13, 2026, Apache-2.0), my earlier TLSNotary verification project for Solana. Fermata's attestor (apps/attestor) ports its TLSNotary plumbing at commit 609a654: the prover and notary halves (notarize.rs), presentation building (present.rs), the core of presentation verification (verify.rs), a presentation attack-test matrix and test fixtures. Each ported file credits WebProof, and apps/attestor keeps WebProof's Apache-2.0 license. Written during the hackathon on top of it: the seven binding checks that tie a proof to an on-chain hold, the delivery predicate, EIP-712 verdict signing, the HTTP service and real-vendor support. Not reused from WebProof: its Solana program, claim format, signing scheme and SDK. The escrow contract, the MPP payment method and SDK, the gateway, the dashboard, the MCP integration, scoring, onboarding and the deployment are all new.
+
+Third-party open-source code, used as dependencies under their own licenses: TLSNotary (tlsn v0.1.0-alpha.15) for MPC-TLS proving and verification; mppx 0.11.0 for the Machine Payments Protocol; viem; Foundry and forge-std; Hono; the Model Context Protocol SDK; React and Vite.
+
+Tools: built with AI coding assistants (Claude Code).
+
 ## Description
 
 AI agents already pay for APIs per call over HTTP 402 (MPP, x402). What they can't do is get their
