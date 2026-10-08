@@ -10,16 +10,13 @@ which leaves about a minute for the clicks and the waits. Freeze: demo, video an
 
 ## Before recording
 
-1. **Per-visitor limits.** You will click several buttons in a row, so relax the limits for the
-   recording and restore them afterwards. Each `--set` redeploys the service (about 2–3 minutes; calls,
-   proofs and scores are kept), so wait until `/demo/status` answers again before you start:
+1. **Per-visitor limits.** The video is recorded. The final setting for judges is one call per visitor
+   every 5 s and 30 per visitor a day (500 a day in total). Each `--set` redeploys the service (about
+   2–3 minutes; calls, proofs and scores are kept), so wait until `/demo/status` answers again:
    ```sh
-   railway variables --service fermata --set DEMO_PER_IP_SECONDS=5 --set DEMO_PER_IP_PER_DAY=500
-   # afterwards:
-   railway variables --service fermata --set DEMO_PER_IP_SECONDS=60 --set DEMO_PER_IP_PER_DAY=15
-   curl -s https://fermata-production-9378.up.railway.app/demo/status | jq .perIpSeconds   # → 60
+   railway variables --service fermata --set DEMO_PER_IP_SECONDS=5 --set DEMO_PER_IP_PER_DAY=30
+   curl -s https://fermata-production-9378.up.railway.app/demo/status | jq .perIpSeconds   # → 5
    ```
-   (On 2026-10-05 the relaxed value, 5, is live: restore it after recording.)
 2. **Connect Claude Code to the live gateway** (once; the agent key is `AGENT_PRIVATE_KEY` from your
    local `.env`, a funded testnet key):
    ```sh
@@ -149,7 +146,7 @@ needs `playwright-core` and Chromium).
 
 ## Pre-record checklist
 
-- [ ] Per-visitor limits relaxed on Railway and the redeploy finished; restored afterwards (`perIpSeconds` → 60).
+- [ ] Per-visitor limits on Railway at the final setting (one call every 5 s, 30 per visitor a day; `perIpSeconds` → 5) and the redeploy finished.
 - [ ] Claude Code connected to the live gateway; the scene's prompt worked in a dry run, with no permission prompt.
 - [ ] Every Try it button pressed once off camera. (Silent vendor checked on the live demo on 2026-10-05:
       no proof after its 10 s attempt, **⏱ Refunded (timeout)** 37 s after the click.)

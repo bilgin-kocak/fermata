@@ -66,7 +66,7 @@ sudo bash /opt/fermata/deploy/bootstrap.sh fermata.example.com     # or: auto
 | Is it working? | `bash /opt/fermata/deploy/smoke.sh https://<host>` |
 | Testnet funds | `sudo -u fermata -H bash -lc 'cd /opt/fermata && pnpm fund'`; the gateway also tops up the demo agent and relayer itself, and turns the demo read-only rather than failing |
 | Recompute the scoreboard | `pnpm scores --chain moderato` (from any machine; reads only the chain) |
-| Settings | `/etc/fermata/fermata.env`: limits (`DEMO_PER_IP_SECONDS`, `DEMO_DAILY_CAP`), `REAL_VENDORS` |
+| Settings | `/etc/fermata/fermata.env`: limits (`DEMO_PER_IP_SECONDS`, `DEMO_PER_IP_PER_DAY`, `DEMO_DAILY_CAP`), `REAL_VENDORS` |
 | State | `/var/lib/fermata/state`: calls, proofs, onboarded vendors (survive restarts) |
 
 ## How it fits together
@@ -78,10 +78,10 @@ internet ──443──▶ Caddy (TLS) ──▶ gateway 127.0.0.1:4300 ──�
 ```
 
 - `fermata.service` runs `scripts/demo-stack.sh run --chain moderato`: the same stack as local development, supervised. If any component dies, the whole stack stops and systemd restarts it after 15 s.
-- Public mode limits:
-  - one demo call per visitor every 20 s;
+- Public mode limits (defaults; the live demo runs with one call per visitor every 5 s, 30 per visitor a day, 500 a day in total):
+  - one demo call per visitor every 60 s (`DEMO_PER_IP_SECONDS`) and 15 per visitor a day (`DEMO_PER_IP_PER_DAY`);
   - one call in flight;
-  - 500 demo calls a day;
+  - 500 demo calls a day in total (`DEMO_DAILY_CAP`);
   - onboarding: 20 checks per hour and 3 registrations per day per address, 20 registrations a day in total.
 - Onboarding only fetches public HTTPS hosts on port 443. Private, loopback, link-local and metadata addresses are refused.
 

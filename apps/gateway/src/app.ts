@@ -49,7 +49,7 @@ export type GatewayDeps = {
 /** JSON-safe copy (bigints as decimal strings). */
 const plain = <T>(v: T): unknown => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === 'bigint' ? x.toString() : x)))
 
-type Service = ServiceConfig & { price: bigint; token: Hex; window: number }
+type Service = ServiceConfig & { price: bigint; token: Hex; window: number; verifier: Address }
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'upgrade', 'proxy-connection', 'te', 'trailer'])
 const ZERO_HASH = `0x${'00'.repeat(32)}` as Hex
@@ -72,7 +72,7 @@ async function checkService(deps: GatewayDeps, signer: Address, cfg: ServiceConf
   if (isAddressEqual(s.token, zeroAddress)) throw new Error(`service ${cfg.serviceId} is not registered on ${deps.chain.escrow}`)
   if (!isAddressEqual(s.verifier, signer)) throw new Error(`service ${cfg.serviceId} is settled by ${s.verifier}, not this attestor (${signer})`)
   if (originHash(cfg.upstream) !== s.originHash) throw new Error(`service ${cfg.serviceId}: upstream ${cfg.upstream} is not the registered origin`)
-  return { ...cfg, price: s.pricePerCall, token: s.token, window: s.settlementWindow }
+  return { ...cfg, price: s.pricePerCall, token: s.token, window: s.settlementWindow, verifier: s.verifier }
 }
 
 /** Checks every configured service against the chain and the attestor; refuses to start on mismatch. */
@@ -279,7 +279,7 @@ export async function createGateway(deps: GatewayDeps) {
     c.json(
       [...services.values()].map((s) => ({
         serviceId: s.serviceId, endpoint: `/s/${s.serviceId}`, upstream: s.upstream, price: s.price.toString(), token: s.token,
-        settlementWindow: s.window, escrow: chain.escrow, chainId: chain.chainId, unprotectedFallback: s.tempo ?? null,
+        settlementWindow: s.window, verifier: s.verifier, escrow: chain.escrow, chainId: chain.chainId, unprotectedFallback: s.tempo ?? null,
       })),
     ),
   )

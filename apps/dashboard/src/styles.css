@@ -500,3 +500,69 @@ footer.foot {
     padding: 1px 8px;
   }
 }
+
+/* Use it tab */
+.use {
+  padding: 14px;
+  display: grid;
+  gap: 16px;
+}
+.use-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 20px;
+}
+.use-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+.use-card h3 {
+  margin: 0;
+  font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.use-card p {
+  margin: 0;
+  color: var(--ink-2);
+}
+/* grid items default to their content's width: let code blocks scroll inside the column instead */
+.use-card > * {
+  min-width: 0;
+}
+.snippet-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.snippet {
+  position: relative;
+  min-width: 0;
+}
+.snippet pre.transcript {
+  padding-right: 72px;
+  max-height: none;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+.snippet.prose pre.transcript {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.snippet button.copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 12px;
+  padding: 2px 10px;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}

@@ -3,6 +3,6 @@ Copyright (c) 2026 Bilgin Kocak
 
 Licensed under the MIT License (see LICENSE), with one exception:
 
-apps/attestor is licensed under the Apache License, Version 2.0 (see apps/attestor/Cargo.toml),
+apps/attestor is licensed under the Apache License, Version 2.0 (see apps/attestor/LICENSE),
 because it ports code from WebProof (github.com/bilgin-kocak/webproof-solana), which is
 Apache-2.0. The ported files credit WebProof in their headers.

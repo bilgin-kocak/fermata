@@ -36,6 +36,8 @@ export type Service = {
   price: string
   token: string
   settlementWindow: number
+  /** The verifier key that settles this service, from its on-chain record. */
+  verifier?: string
   escrow: string
   unprotectedFallback: { amount: string; recipient: string } | null
 }

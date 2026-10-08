@@ -20,7 +20,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | Product-demo video (≤ 3 min) | ✅ | https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9 (recorded on the live demo; script: [`DEMO.md`](DEMO.md)) |
 | Go-to-market | ✅ | [below](#go-to-market) |
 | Screenshots | ✅ | [`docs/img/`](img/) |
-| Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores and List your API. Through it: 100 paid calls → 96 released / 4 refunded, 0 errors (5.4 s per call); `demo:mcp` 6/6; `deploy/smoke.sh` 7/7. |
+| Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores, List your API, and Use it (copy-paste setup for the two npm packages). Through it: 100 paid calls → 96 released / 4 refunded, 0 errors (5.4 s per call); `demo:mcp` 6/6; `deploy/smoke.sh` 7/7. |
 | npm packages | ✅ | [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp): `claude mcp add fermata -- npx -y fermata-mcp` gives Claude pay-on-proof tools on the live demo, with no setup (it creates and funds a testnet wallet). [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk): the `fermata` MPP payment method for agents and servers. Both MIT. |
 | Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides); a PPTX copy is in the repo: [`fermata-pitch-deck.pptx`](fermata-pitch-deck.pptx). **It is private until Bilgin shares it** from the page's Share menu. The presentation video is spoken over it ([`PITCH.md`](PITCH.md)). |
 
@@ -30,13 +30,15 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 
 **Category:** Payments (if the list has no Payments: Infrastructure; AI is the second choice)
 
-**Brief description** (410 / 500 characters):
+**Brief description** (405 / 500 characters):
 
-Fermata is pay on proof for AI agents. When an agent pays an API per call (MPP or x402), the payment is held in escrow on Tempo. TLSNotary records exactly what the vendor's server answered. If that record passes the delivery rule pinned on-chain, the vendor is paid; a proven failure, or no answer in time, refunds the agent automatically. Every movement carries the call ID as its memo. Live on Tempo testnet.
+Fermata is pay on proof for AI agents. When an agent pays an API per call over MPP, the payment is held in escrow on Tempo. TLSNotary records exactly what the vendor's server answered. If that record passes the delivery rule pinned on-chain, the vendor is paid; a proven failure, or no answer in time, refunds the agent automatically. Every movement carries the call ID as its memo. Live on Tempo testnet.
 
 **Invite teammates:** none (solo).
 
 **X / launch post** (for an X or social field, or the traction section): https://x.com/KocakBilgin/status/2107918056542601333
+
+Before pasting: if you have replies, vendor conversations or pilot interest, add them as numbers to the "Demand validation" paragraph.
 
 **Go-to-market strategy, demand validation and distribution** (paste-ready):
 
@@ -48,7 +50,7 @@ Distribution: Fermata sits where agents already pay. MPP clients add the `fermat
 
 Business model: 0.5 % of released payments, set on-chain, nothing on refunds, so Fermata earns only when the vendor gets paid. At scale, sampled proving (a random 5 % of calls) and session escrow bring the proving cost under one-cent calls; this is on the roadmap, not built.
 
-Demand validation so far: a public live demo on Tempo testnet that anyone can try without a wallet (100 paid calls through it: 96 released, 4 refunded, 0 errors), real third-party APIs proven (the npm registry), and a public launch thread on X (https://x.com/KocakBilgin/status/2107918056542601333). [Add any replies, vendor conversations or pilot interest here as numbers; if none yet, keep this sentence:] There are no paying users yet; the next step is pilot conversations with vendors listed in the MPP directory.
+Demand validation so far: a public live demo on Tempo testnet that anyone can try without a wallet (100 paid calls through it: 96 released, 4 refunded, 0 errors), real third-party APIs proven (the npm registry), and a public launch thread on X (https://x.com/KocakBilgin/status/2107918056542601333). There are no paying users yet; the next step is pilot conversations with vendors listed in the MPP directory.
 
 **Prior work and third-party code** (paste-ready):
 
@@ -72,8 +74,9 @@ call through TLSNotary, which produces a cryptographic record of exactly what th
 server sent. If that record passes a delivery predicate the vendor registered up front (status
 code, content type, body size, JSON shape — nothing that needs a trusted clock), the escrow
 **releases** the payment to the vendor, minus a 0.5 % fee. If the record shows a failure, the
-agent is **refunded**. If there is no record at all, the agent reclaims the hold after the
-settlement window. Every movement is a TIP-20 transfer whose memo is the call's ID, so each call
+agent is **refunded**. If there is no record at all, no verdict is signed: once the settlement window
+closes, anyone can call `claimTimeout` (the gateway's sweeper does it automatically) and the
+escrow refunds the agent. Every movement is a TIP-20 transfer whose memo is the call's ID, so each call
 reconciles from on-chain logs alone.
 
 Agents add the `fermata` method to their `mppx` client
@@ -122,8 +125,9 @@ The hosted testnet demo lets judges try all three without a wallet.
 - **MPP over MCP.** The gateway's `/mcp` endpoint exposes every service as a paid MCP tool, using
   mppx's MCP transport with the `fermata` method. `fermata-mcp` (on npm) lets Claude Code or Claude
   Desktop pay those tools from a testnet wallet, with the agent's own allow-lists and a spending cap. In a
-  real headless Claude Code session, Claude bought two quotes: one released, and a proven HTTP 500
-  refunded. It then re-verified the proof (`apps/mcp/README.md`).
+  real headless Claude Code session on a local Tempo emulation, Claude bought two quotes: one
+  released, and a proven HTTP 500 refunded. It then re-verified the proof (`apps/mcp/README.md`).
+  The product-demo video shows the same flow on Moderato testnet.
 - **Stablecoin gas.** Agents pay gas in the same TIP-20 stablecoin (pathUSD on testnet); the demo's
   totals report escrow fee and gas separately.
 - **Network:** Tempo Moderato testnet, chain ID 42431, explorer `explore.testnet.tempo.xyz`.
@@ -159,6 +163,6 @@ The hosted testnet demo lets judges try all three without a wallet.
       3/3 PASS with explorer links (2026-10-01; links and escrow address above and in the README).
 - [x] `pnpm demo:load --calls 100 --chain moderato` → 96/4, 0 errors.
 - [x] Both videos recorded, uploaded and linked above.
-- [ ] `main` is the default branch on GitHub; README renders (Mermaid diagrams, logo).
+- [x] `main` is the default branch on GitHub; README renders (Mermaid diagrams, logo).
 - [ ] Claims audit: nothing in the README, video or this form claims more than the v1 trust model.
 - [ ] Freeze respected (2026-10-09).

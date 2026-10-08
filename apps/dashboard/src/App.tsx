@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Predicate, type ProbeResult, type Reconciliation, type RegisterResult, type Reverify, type Scores, type Service } from './api.ts'
 import { STATUS, age, bytes, serviceLabel, short, usd } from './format.ts'
 
-type Tab = 'live' | 'vendors' | 'onboard' | 'reconciliation' | 'services'
+type Tab = 'live' | 'vendors' | 'onboard' | 'use' | 'reconciliation' | 'services'
+
+/** The public live demo: the gateway fermata-mcp uses when it is given no settings. */
+const LIVE_DEMO = 'https://fermata-production-9378.up.railway.app'
 
 function usePoll<T>(load: () => Promise<T>, ms: number) {
   const [data, setData] = useState<T>()
@@ -165,7 +168,8 @@ function TryIt({ status, calls, info, onOpen }: { status: DemoStatus; calls: Cal
         </div>
       ) : null}
       <footer className="foot" style={{ padding: '0 14px 12px' }}>
-        One call per visitor every {status.perIpSeconds} s · {status.remainingToday} demo calls left today · payer {status.payer ? short(status.payer) : '—'}
+        One call per visitor every {status.perIpSeconds} s · {status.remainingToday} demo calls left today (all visitors) · payer {status.payer ? short(status.payer) : '—'} ·{' '}
+        <a href="#use">pay on proof from your own agent →</a>
       </footer>
     </div>
   )
@@ -654,8 +658,8 @@ function OnboardTab({ info }: { info?: Info }) {
             <pre className="transcript" style={{ marginTop: 8 }}>{`// agents (mppx): one line, pay on proof
 const res = await mppx.fetch('${origin}${result.endpoint}')
 
-# Claude Code: every service is a paid MCP tool
-claude mcp add fermata -e FERMATA_GATEWAY=${origin} -e FERMATA_AGENT_KEY=0x… -e FERMATA_TRUSTED_VERIFIERS=0x… -- npx tsx apps/mcp/src/index.ts`}</pre>
+# Claude Code: every service, yours included, is a paid MCP tool
+${origin === LIVE_DEMO ? 'claude mcp add fermata -- npx -y fermata-mcp' : `claude mcp add fermata -e FERMATA_GATEWAY=${origin} -e FERMATA_TRUSTED_VERIFIERS=0x… -e FERMATA_AGENT_KEY=0x… -- npx -y fermata-mcp`}`}</pre>
             <div className="row-actions" style={{ marginTop: 8 }}>
               <button disabled={!!busy} onClick={() => void tryIt()}>
                 {busy === 'try' ? 'Proving…' : 'Make a paid test call'}
@@ -672,6 +676,147 @@ claude mcp add fermata -e FERMATA_GATEWAY=${origin} -e FERMATA_AGENT_KEY=0x… -
       <footer className="foot" style={{ padding: '0 14px 12px' }}>
         Testnet only. Your API must be public HTTPS on port 443 and speak TLS 1.2 with AES-128-GCM on P-256 (TLSNotary's profile); private and internal addresses are refused.
         Registration is done by the Fermata operator on your behalf; payments go to your payout address.
+      </footer>
+    </div>
+  )
+}
+
+/** A code block with a copy button. */
+function Snippet({ code, label, prose }: { code: string; label?: string; prose?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () =>
+    navigator.clipboard
+      ?.writeText(code)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => undefined)
+  return (
+    <div>
+      {label ? <div className="snippet-label">{label}</div> : null}
+      <div className={prose ? 'snippet prose' : 'snippet'}>
+        <pre className="transcript">{code}</pre>
+        <button className="copy" onClick={() => void copy()} aria-label={`Copy ${label ?? 'the code'}`}>
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** How to pay on proof from your own agent: the two npm packages, filled in for this gateway. */
+function UseTab({ info, services, demo }: { info?: Info; services?: Service[]; demo?: DemoStatus | null }) {
+  const origin = typeof location === 'undefined' ? '' : location.origin
+  const live = origin === LIVE_DEMO
+  const moderato = !!info?.explorer
+  const rpc = moderato ? 'https://rpc.moderato.tempo.xyz' : '<this chain’s RPC URL>'
+  const escrow = info?.escrow ?? '0x…'
+  const verifier = services?.find((s) => s.verifier)?.verifier ?? '0x…'
+  const reliable = demo?.kinds.find((k) => k.id === 'reliable')
+  const paidUrl = reliable ? `${origin}/s/${reliable.serviceId}${reliable.path}` : `${origin}${services?.[0]?.endpoint ?? '/s/<serviceId>'}/…`
+
+  const mcpAdd = live
+    ? 'claude mcp add fermata -- npx -y fermata-mcp'
+    : `claude mcp add fermata \\
+  -e FERMATA_GATEWAY=${origin} \\
+  -e FERMATA_TRUSTED_VERIFIERS=${verifier} \\
+  -e FERMATA_ESCROW=${escrow} \\
+  -e TEMPO_RPC_URL=${rpc} \\
+  -e FERMATA_AGENT_KEY=0x… \\
+  -- npx -y fermata-mcp`
+  const sdk = `import { Receipt } from 'mppx'
+import { Mppx } from 'mppx/client'
+import { createPublicClient, createWalletClient, http, type Hex } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { fermata, tempoChain, type FermataReceipt } from 'fermata-sdk'
+
+const chain = tempoChain('${rpc}')
+const account = privateKeyToAccount(process.env.AGENT_KEY as Hex)
+const wallet = createWalletClient({ account, chain, transport: http() })
+const client = createPublicClient({ chain, transport: http() })
+
+const mppx = Mppx.create({
+  methods: [
+    fermata({
+      wallet,
+      client,
+      escrows: ['${escrow}'],
+      trustedVerifiers: ['${verifier}'],
+    }),
+  ],
+  polyfill: false,
+})
+
+// Held in escrow, then released to the vendor on proof, or refunded to you.
+const url = '${paidUrl}'
+const res = await mppx.fetch(url)
+const receipt = Receipt.fromResponse(res) as FermataReceipt
+console.log(res.status, receipt.outcome, receipt.callId) // 200 DELIVERED 0x…`
+
+  return (
+    <div className="panel">
+      <h2>
+        Use Fermata in your agent <span className="muted">two npm packages · MIT · testnet</span>
+      </h2>
+      <div className="use">
+        <div className="use-grid">
+          <section className="use-card">
+            <h3>
+              Claude and other MCP agents <a className="mono" href="https://www.npmjs.com/package/fermata-mcp" target="_blank" rel="noreferrer">fermata-mcp</a>
+            </h3>
+            <Snippet label="Claude Code" code={mcpAdd} />
+            <p>
+              {live
+                ? 'No settings needed: it pays this demo’s tools from a testnet wallet it creates in ~/.fermata/agent-key and funds from Tempo’s testnet faucet.'
+                : 'Point it at this gateway with your own funded testnet key.'}{' '}
+              Every service here becomes a paid tool, next to free tools for vendor scores, proof re-verification, reconciliation, your wallet and refunds
+              (<span className="mono">fermata_reclaim</span>).
+            </p>
+            {live ? (
+              <Snippet
+                label="Claude Desktop: claude_desktop_config.json"
+                code={'{\n  "mcpServers": {\n    "fermata": { "command": "npx", "args": ["-y", "fermata-mcp"] }\n  }\n}'}
+              />
+            ) : null}
+            <Snippet prose label="Then ask Claude" code="Get the BTC price with get_quote_reliable, then try get_quote_broken, and verify both calls." />
+          </section>
+          <section className="use-card">
+            <h3>
+              TypeScript agents <a className="mono" href="https://www.npmjs.com/package/fermata-sdk" target="_blank" rel="noreferrer">fermata-sdk</a>
+            </h3>
+            <Snippet label="Install" code="npm install fermata-sdk mppx@~0.11.0 viem" />
+            <p>
+              The <span className="mono">fermata</span> payment method for <a href="https://github.com/wevm/mppx" target="_blank" rel="noreferrer">mppx</a>. Before any money
+              moves it checks the escrow and the verifier against your lists, the registered price, and your caps (<span className="mono">maxAmount</span>,{' '}
+              <span className="mono">maxSettlementWindow</span>).
+            </p>
+            <Snippet label="Pay one call on this gateway" code={sdk} />
+            {moderato ? (
+              <Snippet
+                label="Fund a testnet key (Tempo faucet)"
+                code={`curl -s https://rpc.moderato.tempo.xyz -H 'content-type: application/json' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tempo_fundAddress","params":["<your address>"]}'`}
+              />
+            ) : null}
+          </section>
+        </div>
+        <div className="note">
+          <b>Selling an API?</b> {demo?.enabled ? <a href="#onboard">List your API</a> : 'List your API'} registers it in a few clicks: agents then pay it on proof, and its
+          record appears on the <a href="#vendors">Vendors</a> board. Building your own gateway: <span className="mono">fermataServer()</span> in fermata-sdk is the server side
+          of the method.
+        </div>
+        <div className="links">
+          <a href="https://github.com/bilgin-kocak/fermata#use-it-in-your-project" target="_blank" rel="noreferrer">Guide on GitHub</a>
+          <a href="https://github.com/bilgin-kocak/fermata/tree/main/packages/sdk#readme" target="_blank" rel="noreferrer">SDK reference</a>
+          <a href="https://github.com/bilgin-kocak/fermata/tree/main/apps/mcp#readme" target="_blank" rel="noreferrer">MCP server reference</a>
+          <a href="/llms.txt" target="_blank" rel="noreferrer">llms.txt</a>
+          <a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
+        </div>
+      </div>
+      <footer className="foot" style={{ padding: '0 14px 12px' }}>
+        Testnet only, unaudited. The escrow and verifier above are this demo’s, read from its on-chain service records. In your agent they are your own allow-lists: an agent
+        never pays a verifier just because a gateway names it, so pin them from a source you trust, and pay only gateways you trust.
       </footer>
     </div>
   )
@@ -792,6 +937,12 @@ export function App() {
   useEffect(() => {
     location.hash = tab
   }, [tab])
+  // In-page links (#use, #onboard, #vendors) switch tabs.
+  useEffect(() => {
+    const follow = () => setTab((location.hash.slice(1) as Tab) || 'live')
+    addEventListener('hashchange', follow)
+    return () => removeEventListener('hashchange', follow)
+  }, [])
   const openCall = open ? (calls.find((c) => c.callId === open.callId) ?? open) : undefined
   const chainName = info ? (info.explorer ? 'Tempo Moderato' : 'Anvil (Tempo emulation)') : '…'
   return (
@@ -818,6 +969,7 @@ export function App() {
             ['live', 'Live'],
             ['vendors', 'Vendors'],
             ...(demo?.enabled ? ([['onboard', 'List your API']] as const) : []),
+            ['use', 'Use it'],
             ['reconciliation', 'Reconciliation'],
             ['services', 'Services'],
           ] as const
@@ -832,6 +984,7 @@ export function App() {
       {tab === 'reconciliation' ? <ReconciliationTab calls={calls} info={info} /> : null}
       {tab === 'vendors' ? <VendorsTab scores={scores} info={info} /> : null}
       {tab === 'onboard' && demo?.enabled ? <OnboardTab info={info} /> : null}
+      {tab === 'use' ? <UseTab info={info} services={services} demo={demo} /> : null}
       {tab === 'services' ? <ServicesTab services={services} info={info} /> : null}
       <footer className="foot">
         A disclosed Fermata verifier signs each verdict; every verdict points at a TLSNotary presentation anyone can download and

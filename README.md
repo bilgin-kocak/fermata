@@ -4,13 +4,15 @@
 
 **Chargebacks for machine payments, decided on cryptographic evidence instead of a support ticket.**
 
-**Live demo (Tempo Moderato testnet, no wallet needed):** [fermata-production-9378.up.railway.app/dashboard](https://fermata-production-9378.up.railway.app/dashboard/). Use Try it, the Vendors scoreboard, and List your API.
+**Live demo (Tempo Moderato testnet, no wallet needed):** [fermata-production-9378.up.railway.app/dashboard](https://fermata-production-9378.up.railway.app/dashboard/). Use Try it, the Vendors scoreboard, List your API, and Use it (pay on proof from your own agent).
+
+**Use it from Claude:** `claude mcp add fermata -- npx -y fermata-mcp` (testnet; it creates and funds its own wallet) · TypeScript: `npm install fermata-sdk` · [more](#use-it-in-your-project).
 
 **Videos:** [pitch (≈ 3 min)](https://www.loom.com/share/35084c15407244d8b9e91c1d69b220b3) · [product demo](https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9).
 
 A card payment has a chargeback: when the goods never arrive, the buyer disputes and a person
 reads the ticket. An agent paying an API per call has nothing — it pays, the API answers with a
-500 or with garbage, and the money is gone. Fermata is the chargeback for that payment, except no
+500 or with malformed JSON, and the money is gone. Fermata is the chargeback for that payment, except no
 one reads a ticket: the payment is **held** in escrow on [Tempo](https://tempo.xyz), the vendor's
 HTTPS response is recorded with [TLSNotary](https://github.com/tlsnotary/tlsn), and the hold is
 **released** to the vendor only when that record passes a pre-agreed, mechanically checkable
@@ -29,7 +31,7 @@ Vocabulary throughout the code and docs: `hold → release(proof) → refund`. (
 musical symbol that holds a note; Tempo is a music-named chain; we hold the payment until the
 proof lands.)
 
-![Dashboard: a released call re-verified offline against the chain](docs/img/dashboard-reverify.png)
+![Dashboard: a released call re-verified offline against the chain (local Tempo emulation)](docs/img/dashboard-reverify.png)
 
 ## How it works
 
@@ -129,7 +131,7 @@ delivered. The [hosted demo](https://fermata-production-9378.up.railway.app/dash
 - The vendors are a reliable one, a broken one, a silent one, and the real npm registry (a 200 and a 404).
 - Every call links to its transactions and its re-verifiable proof.
 
-![Try it: a paid call to the real npm registry, proved and released](docs/img/public-tryit.png)
+![Try it: a paid call to the real npm registry, proved and released (local Tempo emulation)](docs/img/public-tryit.png)
 
 **Vendor scores.** Each vendor's proven delivery record comes **from the escrow's own events only**:
 - released;
@@ -144,7 +146,7 @@ reliable vendors before paying. Two limits are stated with the scores:
 - only calls paid through Fermata count;
 - a vendor could pay itself, which is why distinct agents are shown.
 
-![Vendor scores from on-chain events](docs/img/public-vendors.png)
+![Vendor scores from on-chain events (local Tempo emulation)](docs/img/public-vendors.png)
 
 **List your API.** A vendor pastes a URL. The gateway:
 1. checks it is a public HTTPS host (never a private or internal address);
@@ -162,7 +164,7 @@ which services to pay (and the scoreboard only ranks what was proven); a product
 require proof of control of the origin, such as a DNS TXT record or a `/.well-known` file, before
 registering a payout for it.
 
-![List your API: compatibility check and the drafted delivery rule](docs/img/public-onboard.png)
+![List your API: compatibility check and the drafted delivery rule (local Tempo emulation)](docs/img/public-onboard.png)
 
 ## What the proof does and does not establish
 
@@ -236,7 +238,7 @@ downloadable, offline-re-verifiable proof:
 3. **No proof before deadline → timeout refund.** Vendor never answers; no verdict is signed; after
    the settlement window the hold is reclaimed to the agent.
 
-![The dashboard after a recorded 100-call run: 95 released, 5 refunded, 0 awaiting timeout](docs/img/video-load-end.png)
+![The dashboard after a recorded 100-call run: 95 released, 5 refunded, 0 awaiting timeout (local Tempo emulation)](docs/img/video-load-end.png)
 
 **Real third-party vendor.** Fermata is not tied to our mock vendor. The demo stack also registers
 the public **npm registry** (`registry.npmjs.org`):
@@ -302,8 +304,9 @@ What is different here:
 
 - **No cooperation from the vendor.** The evidence comes from the vendor's TLS session through a
   blind notary. The vendor doesn't sign anything, so it can't decline to.
-- **No dispute step.** The agent doesn't have to notice a failure and post a bond. Every call is
-  proved and settled within seconds (about 1 s of proving on Moderato, FACTS §15.5).
+- **No dispute step.** The agent doesn't have to notice a failure and post a bond. Every answered
+  call is proved and settled within seconds (about 1 s of proving on Moderato, FACTS §15.5); an
+  unanswered one is refunded when its settlement window closes.
 
 What is the same:
 

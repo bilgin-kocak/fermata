@@ -480,7 +480,7 @@ Repeat runs (same setup, same commands; the 3 % failures are random, so the spli
 |---|---|---|---|---|---|---|
 | M4 (above) | 97 / 3 | 226.8 s | 2.15 / 2.44 s | 1.13 / 1.39 / 5.4 s | 65.9 MB | 345k / 107k |
 | M5 rehearsal (while recording) | 96 / 4 | 244.3 s | 2.17 / 2.67 s | 1.25 / 1.60 / 8.1 s | 65.9 MB | 345k / 107k |
-| **M5 video footage** (`docs/DEMO.md`) | **95 / 5** | **254.1 s** | 2.24 / 2.81 s | 1.26 / 1.74 / 8.0 s | 65.9 MB | 350k / 109k |
+| **M5 video footage** (earlier Anvil footage, 2026-09-29; not the live-demo video in `docs/DEMO.md`) | **95 / 5** | **254.1 s** | 2.24 / 2.81 s | 1.26 / 1.74 / 8.0 s | 65.9 MB | 350k / 109k |
 
 The recording runs had a headless Chromium recording video on the same 4 vCPUs, which is the
 likely cause of the slightly slower proving.
@@ -556,3 +556,17 @@ The notary is still ours (trust model unchanged). Coinbase was not reachable fro
 - The attestor picks up the new predicate file without a restart.
 - `run` supervision is verified: SIGTERM stops all; a dead component stops the stack with exit 1; a restart with stale state skips onboarded services that no longer check out.
 
+### 15.8 Live demo on Railway (2026-10-05)
+
+The hosted demo (`deploy/README.md`) on Tempo Moderato testnet: `pnpm demo:load --calls 100` against
+https://fermata-production-9378.up.railway.app. The numbers are the README's.
+
+| Measurement | Value |
+|---|---|
+| Paid calls | 100 |
+| Outcomes | **96 released / 4 refunded**, 0 errors |
+| Wall-clock, 100 calls | 544.3 s |
+| Per call, agent's view | p50 5.4 s |
+| Prove time (MPC-TLS) | p50 0.56 s |
+| `pnpm demo:mcp` | 6/6 |
+| `deploy/smoke.sh` | 7/7 |
