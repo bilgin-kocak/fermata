@@ -2,8 +2,8 @@
 
 Colosseum asks for **two** videos: this 2–3 minute presentation ("one of the first resources judges
 review") and a product demo of at most 3 minutes ([`DEMO.md`](DEMO.md)). This one is a startup
-pitch, spoken over the deck: [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS)
-(share it before submitting). Each section below is one or two of its ten slides.
+pitch, spoken over the deck: [`fermata-pitch-deck.pptx`](https://github.com/bilgin-kocak/fermata/blob/main/docs/fermata-pitch-deck.pptx). Each section below is one or two
+of its ten slides.
 
 - **Length:** about 310 spoken words; a natural read takes about 3:00.
 - **Recording:** the deck full screen, your voice; your face in a corner, at least on the cover and the

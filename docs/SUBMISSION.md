@@ -22,7 +22,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 | Screenshots | ✅ | [`docs/img/`](img/) |
 | Live demo | ✅ | https://fermata-production-9378.up.railway.app/dashboard/ (Railway, Tempo Moderato testnet). It offers Try it, Vendor scores, List your API, and Use it (copy-paste setup for the two npm packages). Through it: 100 paid calls → 96 released / 4 refunded, 0 errors (5.4 s per call); `demo:mcp` 6/6; `deploy/smoke.sh` 7/7. |
 | npm packages | ✅ | [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp): `claude mcp add fermata -- npx -y fermata-mcp` gives Claude pay-on-proof tools on the live demo, with no setup (it creates and funds a testnet wallet). [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk): the `fermata` MPP payment method for agents and servers. Both MIT. |
-| Pitch deck (10 slides) | ✅ | [Fermata — Pay on proof](https://claude.ai/artifact/AB3JHTSCyQBLXxTi55EZwS) (Claude Slides); a PPTX copy is in the repo: [`fermata-pitch-deck.pptx`](fermata-pitch-deck.pptx). **It is private until Bilgin shares it** from the page's Share menu. The presentation video is spoken over it ([`PITCH.md`](PITCH.md)). |
+| Pitch deck (10 slides) | ✅ | https://github.com/bilgin-kocak/fermata/blob/main/docs/fermata-pitch-deck.pptx (PPTX in the repo: [`fermata-pitch-deck.pptx`](fermata-pitch-deck.pptx)). The presentation video is spoken over it ([`PITCH.md`](PITCH.md)). |
 
 ## Form fields (copy-paste)
 
