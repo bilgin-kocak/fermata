@@ -137,7 +137,7 @@ payment infrastructure for agents and API vendors.
 **Did anyone not listed on the team here do meaningful work on this project?** (491 / 600 characters)
 
 ```text
-No. Fermata is a solo project: no one else contributed to its design, code, docs or videos. Disclosures: I used Claude Code (Anthropic) as an AI coding assistant throughout, and I made the pitch deck with Claude; Claude also appears in the demo as a paying agent. The TLSNotary attestor builds on my own earlier project, WebProof (disclosed under prior work). Open-source libraries (TLSNotary, mppx, viem, Foundry, Hono, React, the MCP SDK) are used as dependencies under their own licenses.
+No. Fermata is a solo project: no one else contributed to its design, code, docs or videos.
 ```
 
 **Is there anything else judges should know about your project that isn't captured above?** (482 / 500 characters)
@@ -145,6 +145,17 @@ No. Fermata is a solo project: no one else contributed to its design, code, docs
 ```text
 Try it in a minute: the live dashboard needs no wallet; `claude mcp add fermata -- npx -y fermata-mcp` lets Claude pay on proof from a testnet wallet it creates. Don't take our dashboard's word: from the repo, `pnpm reverify --call <id>` re-checks any proof offline against the chain. Trust model, plainly: in v1 Fermata signs the verdicts and runs the notary, so a dishonest verdict is detectable, not prevented; the roadmap takes Fermata out of that path. Testnet only, unaudited.
 ```
+
+### Repository context and demo video (paste-ready)
+
+**Please share any important context about your repo** (487 / 500 characters)
+
+```text
+The repo is the whole product, one pnpm monorepo: the escrow contract (Solidity, Foundry), the TLSNotary attestor (Rust), the gateway, the dashboard and the two npm packages (packages/sdk is fermata-sdk, apps/mcp is fermata-mcp). apps/vendor is a mock API with failure modes, used only for the demo. apps/attestor ports TLSNotary code from my earlier project WebProof and stays Apache-2.0; the rest is MIT. Start with the README; docs/FACTS.md backs the numbers. Testnet only, unaudited.
+```
+
+**Please submit a demo video of your product** (YouTube, Loom or Vimeo; up to 3 minutes; the live
+product): https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9 (recorded on the live demo on Tempo testnet; 3:20 long)
 
 ## Description
 
