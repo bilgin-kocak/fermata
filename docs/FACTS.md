@@ -155,6 +155,10 @@ not fetched (egress blocked 2026-09-23).
 | Multiple challenges | "Servers MAY return multiple Payment challenges in a single 402 response"; clients SHOULD pick one they support and MUST send exactly one credential; `Accept-Payment: method/intent;q=` states preferences; the 402 stays authoritative | CONFIRMS (fallback design works) |
 | Receipt | `Payment-Receipt = base64url(JSON {status:"success", method, timestamp, reference, …})`; methods may add fields; **no signature** | — |
 | Discovery | optional `GET /openapi.json` with `x-service-info` and per-operation `x-payment-info` (`intent`, `method`, `amount`, …); every paid operation declares a 402; **no `.well-known`** | — |
+| Service directory | `https://mpp.dev/api/services` lists **129 services** (127 active, 1 in maintenance, 1 beta), fetched 2026-10-08 | CONFIRMS |
+| Refunds | "Refund decisions are up to your service." (`tempoxyz/mpp` `src/pages/advanced/refunds.mdx`) | CONFIRMS |
+| Extensions | "individual payment methods implement constraints or extensions beyond the core MPP specification, such as disputes, refunds, or KYC requirements. This model encourages those extensions." (`src/pages/governance.mdx`) | CONFIRMS |
+| Launch | Tempo mainnet live since 2026-03-18 (§2); MPP was released the same day (launch-day coverage, e.g. The Block and Chainstack's changelog, 2026-03-18) | CONFIRMS (secondary sources for MPP's date) |
 | Stripe method | `stripe.create({ client, networkId, livemode })`: test mode = pathUSD on Tempo testnet, live = USDC.e on mainnet; the switch is the `livemode` you pass, not detected. Not needed for v1 | CONFIRMS (with nuance) |
 
 ## 10. mppx SDK and how to add a custom method

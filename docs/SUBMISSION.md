@@ -28,7 +28,7 @@ Legend: ✅ ready · ⏳ pending · ✍️ Bilgin to fill in
 
 **Project name:** Fermata
 
-**Category:** Payments (if the list has no Payments: Infrastructure; AI is the second choice)
+**Category:** Payments & Remittance
 
 **Brief description** (405 / 500 characters):
 
@@ -61,6 +61,76 @@ My own prior work: WebProof (github.com/bilgin-kocak/webproof-solana, created an
 Third-party open-source code, used as dependencies under their own licenses: TLSNotary (tlsn v0.1.0-alpha.15) for MPC-TLS proving and verification; mppx 0.11.0 for the Machine Payments Protocol; viem; Foundry and forge-std; Hono; the Model Context Protocol SDK; React and Vite.
 
 Tools: built with AI coding assistants (Claude Code).
+
+### Product questions (paste-ready)
+
+Copy each block as is: line breaks are part of the answer and count as one character each. Every
+claim is checked against the repository or a public source (FACTS §9 and §15).
+
+**What are you building, and who is it for?** (973 / 1000 characters)
+
+```text
+I'm building Fermata, pay on proof: chargebacks for machine payments, decided on cryptographic evidence instead of a support ticket.
+
+AI agents pay APIs per call over MPP before the answer arrives. On a 500, broken JSON or silence, the money is gone: a receipt proves the agent paid, not that the vendor delivered.
+
+The payment is held in escrow on Tempo. Fermata's verifier checks a TLSNotary proof of the vendor's response against a delivery rule pinned on-chain. Delivered: the vendor is paid. Proven failure, or no proof in time: the agent is refunded. In v1 Fermata also runs the notary; anyone can re-check a verdict offline.
+
+It's for API vendors selling per call to agents, and the agents paying them. Refunds by rule make a new vendor safer to try. Vendors keep their API and pay 0.5% of released payments, nothing on refunds.
+
+Live on Tempo testnet: 100 paid calls to a randomly failing vendor, 96 released, 4 refunded, 0 errors. On npm: fermata-sdk, fermata-mcp.
+```
+
+**Why did you decide to build this, and why build it now?** (978 / 1000 characters)
+
+```text
+In August I built WebProof, a TLSNotary verifier for Solana. It showed me that a proof of what a server sent can do more than attest: it can decide a payment, without the seller signing anything.
+
+Agents pay APIs per call before the answer arrives, and for such charges MPP has no refund protocol: "Refund decisions are up to your service." Machines have no chargeback. MPP's docs encourage payment methods to add refunds and disputes, so I built Fermata as one.
+
+Why now:
+1. Tempo mainnet launched in March 2026; MPP, co-authored by Stripe and Tempo, already has over 120 paid services in its directory.
+2. TLSNotary can now prove an HTTPS response in about a second (0.56 s median on my live demo), fast enough to settle each call.
+3. Tempo makes per-call escrow practical: stablecoin gas, sub-second blocks, transfer memos. 100 escrowed calls cost the agent $0.034 in gas on testnet.
+
+Reusing WebProof's TLSNotary code, I had Fermata live on Tempo testnet in under two weeks.
+```
+
+**What technologies are you using or integrating with to build your product?** (developer and AI
+tools included; 979 / 1000 characters)
+
+```text
+Tempo Moderato testnet: TIP-20 pathUSD; EIP-2612 permit and hold in one transaction; transferWithMemo (memo = call ID); stablecoin gas; TIP-403 policy checks; TIP-1060 storage credits; source verified on contracts.tempo.xyz.
+Contracts: Solidity 0.8.30 and Foundry (unit, fuzz and invariant tests, plus tests on Tempo's real TIP-20 precompile).
+Proofs: Rust 1.95 and TLSNotary tlsn v0.1.0-alpha.15: MPC-TLS prover, notary and offline verifier, plus seven checks tying each proof to its on-chain hold. EIP-712 verdicts.
+Payments: MPP via mppx 0.11: my own fermata payment method (client and server) and mppx's MCP transport.
+App: TypeScript 5.9, Node 22, viem 2.56, Hono gateway, React 19 and Vite 7 dashboard, MCP SDK 1.31, Vitest, esbuild.
+Ship: Docker on Railway, npm (fermata-sdk, fermata-mcp), Playwright, Loom.
+AI tools: Claude Code (Anthropic) was my coding assistant throughout. Claude is also a paying agent in the demo, via fermata-mcp. I made the pitch deck with Claude.
+```
+
+If that field allows only 500 characters, use this version (491 / 500):
+
+```text
+Tempo Moderato: TIP-20 pathUSD, permit plus hold in one transaction, transferWithMemo, stablecoin gas, TIP-403, TIP-1060; source verified on contracts.tempo.xyz. Solidity 0.8.30, Foundry, tests on Tempo's TIP-20 precompile. Rust and TLSNotary (tlsn v0.1.0-alpha.15). MPP via mppx 0.11, my own fermata method. EIP-712 verdicts. TypeScript, viem, Hono, React, Vite, MCP SDK, Railway, npm. AI: Claude Code (Anthropic) throughout; Claude as a paying agent via fermata-mcp; deck made with Claude.
+```
+
+**Which chains does your product use?** Tempo (only).
+
+**How does your product use these chains?** (481 / 500 characters)
+
+```text
+All the money moves on Tempo. Each paid call is a hold in FermataEscrow: an EIP-2612 permit and a TIP-20 pull in one transaction, whose hash is the agent's MPP credential. Fermata's EIP-712 verdict releases it to the vendor (0.5% fee) or refunds the agent; with no proof in time, anyone can trigger the refund. Every movement is a TIP-20 transfer with the call ID as memo, so calls reconcile from chain logs alone, and vendor scores come from escrow events. Gas is paid in pathUSD.
+```
+
+**What category best describes your product?** Payments & Remittance
+
+**Is your project a mobile-focused dApp?** No. The dashboard works on a phone, but Fermata is
+payment infrastructure for agents and API vendors.
+
+**Where is your team primarily based?** Turkey (Eskişehir).
+
+**Team Telegram contact:** @bilginkocak
 
 ## Description
 
