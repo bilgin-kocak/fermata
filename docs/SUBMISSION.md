@@ -132,6 +132,20 @@ payment infrastructure for agents and API vendors.
 
 **Team Telegram contact:** @bilginkocak
 
+### Notes for judges (paste-ready)
+
+**Did anyone not listed on the team here do meaningful work on this project?** (491 / 600 characters)
+
+```text
+No. Fermata is a solo project: no one else contributed to its design, code, docs or videos. Disclosures: I used Claude Code (Anthropic) as an AI coding assistant throughout, and I made the pitch deck with Claude; Claude also appears in the demo as a paying agent. The TLSNotary attestor builds on my own earlier project, WebProof (disclosed under prior work). Open-source libraries (TLSNotary, mppx, viem, Foundry, Hono, React, the MCP SDK) are used as dependencies under their own licenses.
+```
+
+**Is there anything else judges should know about your project that isn't captured above?** (482 / 500 characters)
+
+```text
+Try it in a minute: the live dashboard needs no wallet; `claude mcp add fermata -- npx -y fermata-mcp` lets Claude pay on proof from a testnet wallet it creates. Don't take our dashboard's word: from the repo, `pnpm reverify --call <id>` re-checks any proof offline against the chain. Trust model, plainly: in v1 Fermata signs the verdicts and runs the notary, so a dishonest verdict is detectable, not prevented; the roadmap takes Fermata out of that path. Testnet only, unaudited.
+```
+
 ## Description
 
 AI agents already pay for APIs per call over HTTP 402 (MPP, x402). What they can't do is get their
