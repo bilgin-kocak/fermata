@@ -11,6 +11,10 @@ not been reviewed by a third party. Do not use it with real funds.
   operator; the notary is a separate process run by us in the demo. A dishonest verdict is
   detectable (every verdict points at a presentation anyone can re-verify offline), not prevented.
   See "What the proof does and does not establish" in the [README](README.md).
+- **Proofs are public in the demo.** A presentation reveals the vendor's whole response, and the
+  gateway serves it to anyone (`/proofs/:callId`) so that anyone can re-verify; call IDs are public
+  on-chain. Do not list an API that returns private or proprietary data on the demo. A production
+  deployment needs access-controlled proofs and selective disclosure (see the README section above).
 - **Dependencies.** TLSNotary `v0.1.0-alpha.15` is alpha software consumed as a git dependency;
   `mppx@0.11.0` is an early release.
 

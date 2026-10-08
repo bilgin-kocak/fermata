@@ -71,7 +71,7 @@ of its ten slides.
 | Claude can pay through it and get refunded | `pnpm demo:mcp` 6/6 against the live gateway; a real Claude Code session in `apps/mcp/README.md`; the demo video shows it live |
 | Recourse needs the seller's signature and a bonded dispute | README "How Fermata compares" (checked against its repository) |
 | Half a percent on releases, nothing on refunds | `feeBps = 50` on-chain; refunds never charge a fee |
-| Five percent sampling cuts the proving cost twentyfold | the deck's economics slide: 65.9 MB measured per proof at an assumed $0.09/GB, × 5 % ≈ $0.0003 of bandwidth per call — a plan, not built |
+| Five percent sampling cuts the proving cost twentyfold | the deck's economics slide: 65.9 MB measured per proof at an assumed $0.09/GB, × 5 % ≈ $0.0003 of bandwidth per call — a plan, not built; sampling protects statistically, not call by call (README "Economics") |
 
 ## Don't say
 
@@ -82,3 +82,4 @@ of its ten slides.
 - That the data is correct: the proof shows what the server sent, not that a price is right.
 - Market-size figures or traction you can't back with a source.
 - That sampled proving, session escrow or vendor-chosen verifiers exist: they are the roadmap.
+- That sampled proving keeps every call refundable: a call that was not proved cannot be proved later.

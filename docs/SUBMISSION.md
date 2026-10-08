@@ -42,13 +42,13 @@ Before pasting: if you have replies, vendor conversations or pilot interest, add
 
 **Go-to-market strategy, demand validation and distribution** (paste-ready):
 
-Why now: agent payments went live this year. MPP, co-authored by Stripe and Tempo, launched with Tempo mainnet in March 2026, and its directory already lists over a hundred paid services. Agents now pay per call before the answer arrives, and MPP's own docs leave refunds "up to your service", so there is no chargeback for machines.
+Why now: agent payments went live this year. MPP, co-authored by Stripe and Tempo, launched with Tempo mainnet in March 2026; its directory lists 129 paid services. Agents pay per call before the answer arrives, and MPP leaves refunds "up to your service": machines have no chargeback.
 
-First customers: API vendors already selling to agents over MPP or x402 (data, search, enrichment, inference and tool APIs priced per call). The wedge is trust they don't have to build: an agent can safely pay a vendor it has never seen, because a failed call is refunded by rule. For the vendor it is a conversion argument, not a cost: they register once, and their API doesn't change.
+First customers: API vendors already selling compact, higher-value answers to agents over MPP or x402 (B2B data, enrichment, search and specialized tools). The wedge is trust they don't have to build: an agent can pay a vendor it has never seen, because a failed call is refunded by rule. For the vendor it is a conversion argument, not a cost: they register once, and their API doesn't change.
 
 Distribution: Fermata sits where agents already pay. MPP clients add the `fermata` payment method from the fermata-sdk npm package; MCP agents such as Claude get pay-on-proof tools with one command, `claude mcp add fermata -- npx -y fermata-mcp`, with no wallet setup; vendors list themselves through self-serve onboarding ("List your API") and appear on a public scoreboard computed from on-chain events. Each verdict improves that scoreboard, which agents can read before choosing a vendor.
 
-Business model: 0.5 % of released payments, set on-chain, nothing on refunds, so Fermata earns only when the vendor gets paid. At scale, sampled proving (a random 5 % of calls) and session escrow bring the proving cost under one-cent calls; this is on the roadmap, not built.
+Business model: 0.5 % of released payments, set on-chain, nothing on refunds, so Fermata earns only when the vendor gets paid. With an independent notary a proof moves about 66 MB (≈ $0.006), so proving every call pays off from about $1.20 per call; proving a random 5 % lowers that to about $0.06, with statistical rather than per-call protection. Roadmap, not built.
 
 Demand validation so far: a public live demo on Tempo testnet that anyone can try without a wallet (100 paid calls through it: 96 released, 4 refunded, 0 errors), real third-party APIs proven (the npm registry), and a public launch thread on X (https://x.com/KocakBilgin/status/2107918056542601333). There are no paying users yet; the next step is pilot conversations with vendors listed in the MPP directory.
 
@@ -183,8 +183,9 @@ protection as tools: one command, `claude mcp add fermata -- npx -y fermata-mcp`
 Trust model (v1), stated plainly: the escrow trusts one verifier key per service, held by
 Fermata; the notary is a separate, blind process that we run in the demo. A vendor trusts
 Fermata to sign honest verdicts — but every verdict points at a proof anyone can download and
-re-verify offline, so a dishonest verdict is detectable and the evidence is portable. Vendor-chosen
-verifiers, an N-of-M quorum and on-chain proof verification are on the roadmap.
+re-verify offline, so a dishonest verdict is detectable and the evidence is portable. An independent
+notary (each service already pins its notary key on-chain), then vendor-chosen verifiers, an N-of-M
+quorum and on-chain proof verification are on the roadmap.
 
 ### Product
 
@@ -247,9 +248,11 @@ The hosted testnet demo lets judges try all three without a wallet.
   That is a conversion argument for the vendor, not a cost: they register once, and their API
   doesn't change.
 - **Business model:** 0.5 % fee on released payments (on-chain, `feeBps = 50`); nothing on refunds.
-- **Path to scale:** session escrow, sampled proving and prove-on-dispute bring proving cost below
-  one-cent calls (see the README's economics note: today ≈ 1.1 s and ≈ 66 MB of MPC traffic per
-  proven call); vendor-hosted gateways and vendor-chosen verifiers remove Fermata from the trust path.
+- **Path to scale:** start with compact, higher-value calls. With an independent notary a proof
+  moves ≈ 66 MB (≈ $0.006 at $0.09/GB): proving every call pays off from about $1.20 per call, a
+  random 5 % sample from about $0.06 (statistical, not per-call, protection; README "Economics").
+  An independent notary, vendor-hosted gateways and vendor-chosen verifiers remove Fermata from the
+  trust path.
 
 ## Before submitting
 

@@ -171,10 +171,11 @@ registering a payout for it.
 * A TLSNotary presentation establishes that a specific HTTPS server, identified by its TLS certificate, sent specific bytes in response to specific request bytes. That is all. It does not establish that the data is correct (a quoted price can be wrong), and it cannot establish that a server never responded (no transcript, no proof).
 * Therefore the delivery predicate only contains things that are checkable on the transcript: status code, content type, body size, JSON shape. No latency or timing checks in the predicate — the transcript has no trusted clock. Latency SLAs, if any, are gateway policy, not proof-backed.
 * No response from the vendor → no transcript → no verdict. The agent is protected by the on-chain timeout refund, never by a verdict signed without evidence.
+* A presentation reveals the vendor's whole response, and the gateway serves it to anyone at `/proofs/:callId`: that is what lets anyone re-verify a verdict. Call IDs are public on-chain, so in this demo every paid answer is public too. That is fine for its data (test quotes, public npm metadata), not for a vendor selling proprietary or personal data. Production needs proofs shared only with the agent, the vendor and, in a dispute, an auditor, plus selective disclosure (TLSNotary can reveal chosen parts of a transcript and keep the rest hidden).
 
 ### Trust model (v1)
 
-The escrow contract trusts one registered verifier key per service, which Fermata holds; the notary is a separate process (run by us in the demo, pluggable to any notary running the same TLSNotary version¹) whose only job is to be blind; the gateway is the prover². A vendor therefore trusts the Fermata operator to sign honest verdicts, including refunds. What the design adds over "trust the operator": every verdict points at a presentation anyone can download and re-verify offline against the pinned notary key, so a dishonest verdict is detectable and the evidence is portable to any future adjudicator. Independent verification is not the same as independent adjudication; roadmap items (vendor-chosen verifiers, N-of-M verifier quorum, on-chain presentation verification) close that gap.
+The escrow contract trusts one registered verifier key per service, which Fermata holds; the notary is a separate process (run by us in the demo, pluggable to any notary running the same TLSNotary version¹) whose only job is to be blind; the gateway is the prover². A vendor therefore trusts the Fermata operator to sign honest verdicts, including refunds. What the design adds over "trust the operator": every verdict points at a presentation anyone can download and re-verify offline against the pinned notary key, so a dishonest verdict is detectable and the evidence is portable to any future adjudicator. Independent verification is not the same as independent adjudication; roadmap items (an independent notary first, then vendor-chosen verifiers, an N-of-M verifier quorum and on-chain presentation verification) close that gap.
 
 ¹ *Adjusted from the brief after Milestone 0:* TLSNotary removed its notary server in
 `v0.1.0-alpha.13` and PSE's public notary (`notary.pse.dev`) has been shut down
@@ -282,10 +283,27 @@ proving (p50); `pnpm demo:mcp` → 6/6; `deploy/smoke.sh` → 7/7. Its Vendors t
 Per-call MPC proving is too slow and too bandwidth-heavy for one-cent calls at scale. In the
 100-call load test every call cost **≈ 1.1–1.4 s of MPC-TLS and ≈ 66 MB of prover↔notary
 traffic** on top of two transactions (hold ≈ 345k gas, settle ≈ 107k gas) — for a $0.01 quote.
-v1 proves every call to demonstrate the mechanism end to end. The production shape: **session
-escrow** (hold once for N calls, settle in batches), **sampled proving** (prove a random,
-unpredictable subset; the vendor cannot tell which calls are checked) and **prove-on-dispute**
-(proofs only when the agent flags a call, with the hold covering the dispute window).
+v1 proves every call to demonstrate the mechanism end to end.
+
+**Unit economics, plainly.** In v1 the prover and the notary share a machine, so those 66 MB never
+leave it and a proof costs about a second of CPU. An independent notary (the first step off the
+trust path, see the roadmap) sends them across the network: at an assumed $0.09/GB that is
+≈ $0.006 per proved call, while the 0.5 % fee on a $0.01 call is $0.00005. Counting bandwidth
+alone, a call proved every time pays for itself from about **$1.20**; proving a random 5 % of calls
+lowers that to about **$0.06**. So the first market is compact, higher-value answers (B2B data,
+enrichment, specialized tools) where delivery matters more than a few seconds, not one-cent calls
+or streamed inference.
+
+The production shape, none of it built yet:
+
+- **Session escrow:** hold once for N calls, settle in batches.
+- **Sampled proving:** prove a random, unpredictable subset; the vendor cannot tell which calls are
+  checked. This changes the guarantee: a call that was not proved cannot be proved later (the
+  notary must take part in the live TLS session), so unchecked calls are protected statistically,
+  through the vendor's public record (and, for example, a bond that a proven failure forfeits),
+  not refunded one by one.
+- **Proof on request:** the agent asks for a proof before a call it cares about, for the same
+  reason: a call cannot be proved after the fact.
 
 ## How Fermata compares
 
@@ -327,10 +345,11 @@ Comparison checked against each project's public repository or specification on 
 
 ## Roadmap
 
+- **An independent notary** — a partner or a vendor runs `fermata-attest notary` with its own key; services register that key's hash and the attestor points `--notary` at it (no contract change). Fermata could then no longer produce a transcript the server never sent (note ²): only the verdict signer is trusted, and a dishonest verdict is detectable offline.
 - **Vendor-chosen verifiers and an N-of-M verifier quorum** — move adjudication off the Fermata operator.
 - **On-chain presentation verification** — the escrow checks the evidence itself instead of a signature over it.
 - **Vendor-hosted gateways** — the vendor runs the gateway and prover next to its API.
-- **Session escrow, sampled proving, prove-on-dispute** — the economics above.
+- **Session escrow, sampled proving, proof on request** — the economics above.
 - **`session` intent for streaming APIs** — per-chunk holds for streamed and long-running responses.
 - **Stripe method for fiat vendors** — a `stripe` MPP method behind a flag, for vendors paid in fiat.
 
