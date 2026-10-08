@@ -122,10 +122,6 @@ importers:
   apps/vendor: {}
 
   packages/sdk:
-    dependencies:
-      viem:
-        specifier: ^2.56.8
-        version: 2.56.8(typescript@5.9.3)(zod@4.6.5)
     devDependencies:
       '@types/node':
         specifier: ^22.19.0
@@ -136,6 +132,9 @@ importers:
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
+      viem:
+        specifier: ^2.56.8
+        version: 2.56.8(typescript@5.9.3)(zod@4.6.5)
       vitest:
         specifier: ^5.0.1
         version: 5.0.1(@types/node@22.20.4)(vite@8.3.1(@types/node@22.20.4)(esbuild@0.28.2)(tsx@4.23.15))

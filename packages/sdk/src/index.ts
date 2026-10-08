@@ -1,4 +1,5 @@
 export * from './chain.ts'
+export type { AnyPublicClient, AnyWalletClient } from './clients.ts'
 export * from './verdict.ts'
 export * from './requestHash.ts'
 export * from './serviceId.ts'

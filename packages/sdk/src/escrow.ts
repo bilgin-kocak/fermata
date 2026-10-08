@@ -1,5 +1,6 @@
 import type { Account, Address, Chain, Hex, PublicClient, Transport, WalletClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
+import type { AnyPublicClient, AnyWalletClient } from './clients.ts'
 import { scanBlocks } from './logs.ts'
 import { tip20Abi, type Movement } from './tip20.ts'
 
@@ -7,12 +8,12 @@ import { tip20Abi, type Movement } from './tip20.ts'
 export const HoldStatus = { None: 0, Held: 1, Released: 2, Refunded: 3, TimedOut: 4 } as const
 export type HoldStatus = (typeof HoldStatus)[keyof typeof HoldStatus]
 
-export function getHold(client: PublicClient, escrow: Address, callId: Hex) {
-  return client.readContract({ address: escrow, abi: fermataEscrowAbi, functionName: 'getHold', args: [callId] })
+export function getHold(client: AnyPublicClient, escrow: Address, callId: Hex) {
+  return (client as PublicClient).readContract({ address: escrow, abi: fermataEscrowAbi, functionName: 'getHold', args: [callId] })
 }
 
-export function getService(client: PublicClient, escrow: Address, serviceId: Hex) {
-  return client.readContract({ address: escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [serviceId] })
+export function getService(client: AnyPublicClient, escrow: Address, serviceId: Hex) {
+  return (client as PublicClient).readContract({ address: escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [serviceId] })
 }
 
 /**
@@ -25,9 +26,10 @@ export function getService(client: PublicClient, escrow: Address, serviceId: Hex
  * the legs into and out of the escrow.
  */
 export async function reconcile(
-  client: PublicClient,
+  anyClient: AnyPublicClient,
   opts: { token: Address; callId: Hex; fromBlock?: bigint; toBlock?: bigint },
 ): Promise<(Movement & { txHash: Hex; blockNumber: bigint })[]> {
+  const client = anyClient as PublicClient
   const head = await client.getBlockNumber()
   const toBlock = opts.toBlock !== undefined && opts.toBlock < head ? opts.toBlock : head // never past the head
   const found: (Movement & { txHash: Hex; blockNumber: bigint; logIndex: number })[] = []
@@ -47,11 +49,13 @@ export async function reconcile(
  * may send it; the money always goes to the agent, so an agent never depends on the gateway.
  */
 export async function reclaim(
-  wallet: WalletClient<Transport, Chain, Account>,
-  client: PublicClient,
+  anyWallet: AnyWalletClient,
+  anyClient: AnyPublicClient,
   escrow: Address,
   callId: Hex,
 ) {
+  const wallet = anyWallet as WalletClient<Transport, Chain, Account>
+  const client = anyClient as PublicClient
   const hold = await getHold(client, escrow, callId)
   if (hold.status !== HoldStatus.Held) throw new Error(`call ${callId} is not held (status ${hold.status})`)
   const now = (await client.getBlock()).timestamp

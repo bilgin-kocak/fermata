@@ -1,6 +1,6 @@
 {
   "name": "fermata-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pay on proof for AI agents: the `fermata` MPP payment method (agent and server side), escrow bindings on Tempo, reconciliation by memo and vendor scores.",
   "license": "MIT",
   "type": "module",
@@ -53,16 +53,15 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepack": "pnpm run build"
   },
-  "dependencies": {
-    "viem": "^2.56.8"
-  },
   "peerDependencies": {
-    "mppx": "~0.11.0"
+    "mppx": "~0.11.0",
+    "viem": "^2.54.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
+    "mppx": "0.11.0",
     "typescript": "~5.9.3",
-    "vitest": "^5.0.1",
-    "mppx": "0.11.0"
+    "viem": "^2.56.8",
+    "vitest": "^5.0.1"
   }
 }

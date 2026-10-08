@@ -23,7 +23,8 @@ Two parts:
   (offline re-verification against the chain), `fermata_reconcile` (TIP-20 movements by memo).
 - **`fermata-mcp`** (this package, stdio): the process the agent launches. It holds the agent's
   testnet key, connects to the gateway's `/mcp` with `McpClient.wrap(client, { methods: [fermata({ … })] })`
-  from `mppx/mcp/client`, and re-exposes the tools. It adds `fermata_wallet`.
+  from `mppx/mcp/client`, and re-exposes the tools. It adds `fermata_wallet` and `fermata_reclaim`
+  (refunds one of your holds that is still open after its settlement window).
 
 Before any money moves, `fermata-mcp` checks, in the SDK's `fermata()` client:
 
@@ -31,8 +32,15 @@ Before any money moves, `fermata-mcp` checks, in the SDK's `fermata()` client:
   `FERMATA_TRUSTED_VERIFIERS`), never against what the gateway claims;
 - that the price is the registered price.
 
-It also runs a spending guard: a per-call cap (`FERMATA_MAX_PRICE`) and a per-session budget
-(`FERMATA_BUDGET`). A declined payment comes back as a tool error, and no hold is made.
+It also runs a spending guard: a per-call cap (`FERMATA_MAX_PRICE`), a per-session budget
+(`FERMATA_BUDGET`) and a longest settlement window (`FERMATA_MAX_WINDOW`). A declined payment comes
+back as a tool error, and no hold is made. If a paid call fails after the money is held (it gives up
+after 3 minutes), the error names the call: `fermata_call` shows its state, and `fermata_reclaim`
+refunds it once its settlement window has passed.
+
+The automatic wallet pays one call at a time within one `fermata-mcp` process. Two sessions running
+at once share it and can collide on its nonces (the payment fails; nothing is lost): give each
+session its own `FERMATA_AGENT_KEY` if you run several.
 
 ## Use it from Claude Code
 
@@ -82,6 +90,7 @@ its `mcpServers` config.
 | `FERMATA_TRUSTED_VERIFIERS` | the live demo's verifier, for the live demo only; otherwise required | verifier address(es) you accept, never taken from the gateway |
 | `FERMATA_MAX_PRICE` | `100000` (0.10) | max price per call, token base units |
 | `FERMATA_BUDGET` | `1000000` (1.00) | max total held per session |
+| `FERMATA_MAX_WINDOW` | `3600` | longest settlement window accepted, in seconds: an unsettled payment stays held that long |
 
 ## A real Claude session (Anvil, 2026-10-02)
 

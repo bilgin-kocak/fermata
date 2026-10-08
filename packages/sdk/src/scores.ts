@@ -12,6 +12,7 @@
 // Limits (shown wherever scores are shown): only calls paid through Fermata count, and a vendor can
 // pay itself to inflate its score; distinct agents are reported for that reason.
 import { type Address, type Hex, type PublicClient } from 'viem'
+import type { AnyPublicClient } from './clients.ts'
 import { fermataEscrowAbi } from './abi.ts'
 import { scanBlocks } from './logs.ts'
 
@@ -126,11 +127,12 @@ export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
  * on an error. Returns the logs and the last block scanned.
  */
 export async function fetchEscrowLogs(
-  client: PublicClient,
+  anyClient: AnyPublicClient,
   escrow: Address,
   fromBlock: bigint,
   opts: { toBlock?: bigint; chunk?: bigint } = {},
 ): Promise<{ logs: EscrowLog[]; toBlock: bigint }> {
+  const client = anyClient as PublicClient
   const toBlock = opts.toBlock ?? (await client.getBlockNumber())
   const logs: EscrowLog[] = []
   await scanBlocks(fromBlock, toBlock, async (from, to) => {

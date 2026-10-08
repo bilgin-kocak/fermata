@@ -1,6 +1,6 @@
 {
   "name": "fermata-mcp",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "Pay-on-proof tools for Claude and other MCP agents: a local MCP server that pays a Fermata gateway's tools from a Tempo testnet wallet, released only on a TLSNotary proof, refunded on failure.",
   "license": "MIT",
   "type": "module",

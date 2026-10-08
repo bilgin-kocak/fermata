@@ -3,7 +3,8 @@
 When an AI agent pays an API per call, the payment is gone even if the API fails. With Fermata the
 payment is **held in escrow on [Tempo](https://tempo.xyz)** and **released to the vendor only when a
 [TLSNotary](https://github.com/tlsnotary/tlsn) proof of the vendor's HTTPS answer passes a delivery
-rule pinned on-chain**. A proven failure, or no proof in time, refunds the agent automatically.
+rule pinned on-chain**. A proven failure refunds the agent; a call with no proof in time is refunded
+once its settlement window closes.
 
 This package is the TypeScript side: the `fermata` payment method for [mppx](https://github.com/wevm/mppx)
 (the Machine Payments Protocol), for agents and for servers, plus escrow bindings, reconciliation by
@@ -60,10 +61,23 @@ curl -s https://rpc.moderato.tempo.xyz -H 'content-type: application/json' \
 ```
 
 Before any money moves, `fermata()` checks the chain, that the escrow is on your list, that the
-service is settled by a verifier on your list, and that the price is the service's registered price.
-The receipt names the call, its outcome (`DELIVERED`, `FAILED`, or `AWAITING_TIMEOUT` when the vendor
-never answered and the escrow will refund you) and the settlement transaction. A gateway lists its
-services, prices and endpoints at `GET /services`.
+service is settled by a verifier on your list, that the price is the service's registered price, and
+that the price and the settlement window are within your limits: `maxAmount` (no cap by default) and
+`maxSettlementWindow` (1 hour by default; an unsettled payment stays held that long). The receipt a
+Fermata gateway returns names the call, its outcome (`DELIVERED`, `FAILED`, or `AWAITING_TIMEOUT`
+when the vendor never answered and the escrow will refund you) and the settlement transaction. A
+gateway lists its services, prices and endpoints at `GET /services`.
+
+If a paid call fails after the money is held (a network error, a gateway that rejects the hold), the
+gateway may have no record of it to settle. Pass `onHold` to keep each hold's `callId` and `escrow`;
+`reclaim(wallet, client, escrow, callId)` refunds it once its settlement window has passed. When a
+gateway challenges the same call again, `fermata()` reuses its hold instead of paying twice.
+
+**Pay only gateways you trust.** A challenge is not bound to the URL you fetched: a server that relays
+a Fermata gateway's challenge can make you pay, at a trusted service's registered price, for a
+request of its choosing. And a trusted verifier does not vouch for every service that names it:
+anyone can register one, which is why the price and the window are capped. Keep `polyfill: false`
+and call `mppx.fetch` only on gateway URLs you chose.
 
 Using Claude or another MCP agent instead? See [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp):
 `claude mcp add fermata -- npx -y fermata-mcp`.
@@ -88,7 +102,9 @@ const mppx = Mppx.create({
 
 It validates the agent's hold transaction (the `Held` event for this call, service, request and
 price on this escrow; the hold still open), claims each call ID once, and tolerates a load-balanced
-RPC a block behind. Proving and settling are the gateway's job: see `apps/gateway` in the repository.
+RPC a block behind. The claims live in `store`, in memory by default: when more than one instance
+serves the same escrow, pass a shared mppx `Store.AtomicStore`. Proving and settling are the
+gateway's job: see `apps/gateway` in the repository.
 
 ## Also in the box
 
@@ -99,6 +115,8 @@ RPC a block behind. Proving and settling are the gateway's job: see `apps/gatewa
 | `getHold`, `getService`, `reclaim` | Escrow reads; `reclaim` sends `claimTimeout` once a hold's window has passed |
 | `requestHash`, `serviceId`, `originHash`, `predicateHash`, `notaryKeyHash` | The hashes the escrow and the attestor agree on |
 | `escrowDeployment('moderato')`, `tempoChain(rpc)`, `MODERATO`, `TOKENS`, `fermataEscrowAbi` | Network constants and the escrow ABI |
+
+Clients built on `tempoChain()` or on viem's own `tempoModerato` both work.
 
 ## What a proof does and does not establish
 

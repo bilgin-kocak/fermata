@@ -1,6 +1,7 @@
 import { Challenge, Errors, Method, Store } from 'mppx'
 import { isAddressEqual, parseEventLogs, toHex, type Address, type Hex, type PublicClient } from 'viem'
 import { fermataEscrowAbi } from './abi.ts'
+import type { AnyPublicClient } from './clients.ts'
 import { HoldStatus, getHold } from './escrow.ts'
 import { eventually } from './eventually.ts'
 import { fermataMethod } from './method.ts'
@@ -11,11 +12,15 @@ const fail = (reason: string): never => {
 const sameHex = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 export type FermataServerOptions = {
-  client: PublicClient
+  /** A viem public client on the escrow's chain (any chain definition). */
+  client: AnyPublicClient
   escrow: Address
   /** The mppx HMAC secret of the server using this method (the same `secretKey` as `Mppx.create`). */
   secretKey: string
-  /** Replay store; one claim per callId. Defaults to an in-memory store. */
+  /**
+   * Replay store: each callId is claimed once. Defaults to an in-memory store, which protects one
+   * process only: when more than one instance serves the same escrow, pass a shared store.
+   */
   store?: Store.AtomicStore
   /** How long to look for a hold the RPC does not show yet (a node behind the agent's), in ms. Default 6000. */
   lagToleranceMs?: number
@@ -34,7 +39,8 @@ export type FermataServerOptions = {
  * - `broadcast` claims the callId once (replay protection) and returns the receipt.
  * Every rejection is a `VerificationFailedError` (HTTP 402), never a 500.
  */
-export function fermataServer({ client, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000 }: FermataServerOptions): Method.Server<typeof fermataMethod> {
+export function fermataServer({ client: anyClient, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000 }: FermataServerOptions): Method.Server<typeof fermataMethod> {
+  const client = anyClient as PublicClient
   const tries = Math.max(1, Math.round(lagToleranceMs / 500))
   return Method.toServer(fermataMethod, {
     request({ credential, request }) {

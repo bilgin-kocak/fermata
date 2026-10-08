@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Challenge, Errors } from 'mppx'
+import { Challenge, Credential, Errors } from 'mppx'
 import { domainSeparator, encodeAbiParameters, encodeEventTopics, keccak256, pad, toHex, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { fermataEscrowAbi } from '../src/abi.ts'
@@ -36,7 +36,7 @@ function fakeClient(opts: { logs?: unknown[]; status?: 'success' | 'reverted'; h
     readContract: async ({ functionName }: { functionName: string }) =>
       functionName === 'getHold'
         ? { status: opts.holdStatus ?? 1, deadline: 2_000_000_000n }
-        : { token, verifier, pricePerCall: 10_000n, ...opts.service },
+        : { token, verifier, pricePerCall: 10_000n, settlementWindow: 120, ...opts.service },
     getChainId: async () => 42431,
     getBlock: async () => ({ timestamp: 1_700_000_000n }),
   } as never
@@ -146,8 +146,62 @@ describe('fermata client method', () => {
     ['an untrusted verifier', fakeClient({ service: { verifier: agent } }), challenge(), /trusted verifier/],
     ['another token', fakeClient(), challenge({ currency: agent }), /trusted verifier|token/],
     ['a price mismatch', fakeClient(), challenge({ amount: '20000' }), /registered price/],
+    ['a settlement window over the default 1 h', fakeClient({ service: { settlementWindow: 30 * 86_400 } }), challenge(), /maxSettlementWindow/],
   ])('refuses %s before any money moves', async (_, client, c, reason) => {
     await expect(create(client, c)).rejects.toThrow(reason)
+  })
+
+  it('refuses a price above maxAmount and a window above maxSettlementWindow', async () => {
+    const m = (o: object) => fermata({ wallet, client: fakeClient(), trustedVerifiers: [verifier], escrows: [escrow], ...o })
+    await expect(m({ maxAmount: 9_999n }).createCredential({ challenge: challenge() } as never)).rejects.toThrow(/maxAmount/)
+    await expect(m({ maxSettlementWindow: 60 }).createCredential({ challenge: challenge() } as never)).rejects.toThrow(/maxSettlementWindow/)
+  })
+
+  /** A client and wallet that can sign a permit and mine holds; `confirm` false makes the receipt wait fail. */
+  function payer(o: { confirm?: boolean } = {}) {
+    const base = fakeClient() as unknown as Record<string, (a?: unknown) => Promise<unknown>>
+    const domain = { name: 'pathUSD', version: '1', chainId: 42431, verifyingContract: token } as const
+    const sent: Hex[] = []
+    const client = {
+      ...base,
+      readContract: async (a: { functionName: string }) =>
+        a.functionName === 'name' ? 'pathUSD' : a.functionName === 'nonces' ? 0n : a.functionName === 'DOMAIN_SEPARATOR' ? domainSeparator({ domain }) : base.readContract!(a),
+      waitForTransactionReceipt: async () => {
+        if (o.confirm === false) throw new Error('Timed out while waiting for transaction')
+        return { status: 'success' }
+      },
+    }
+    const wallet = { account: privateKeyToAccount(pad('0x01', { size: 32 })), writeContract: async () => (sent.push(keccak256(toHex(`tx${sent.length}`))), sent.at(-1)!) }
+    return { client: client as never, wallet: wallet as never, sent }
+  }
+
+  it('gives back its own hold when the gateway challenges the same callId again, instead of holding twice', async () => {
+    const p = payer()
+    const m = fermata({ wallet: p.wallet, client: p.client, trustedVerifiers: [verifier], escrows: [escrow] })
+    const first = await m.createCredential({ challenge: challenge() } as never)
+    const again = await m.createCredential({ challenge: challenge() } as never)
+    expect(p.sent).toHaveLength(1)
+    expect(Credential.deserialize(again).payload).toEqual(Credential.deserialize(first).payload)
+    await expect(m.createCredential({ challenge: challenge({ requestHash: keccak256(toHex('other')) }) } as never)).rejects.toThrow(/already held/)
+    expect(p.sent).toHaveLength(1)
+  })
+
+  it('still returns the credential when onHold throws (the hold is mined)', async () => {
+    const p = payer()
+    const seen: unknown[] = []
+    const m = fermata({ wallet: p.wallet, client: p.client, trustedVerifiers: [verifier], escrows: [escrow], onHold: (h) => (seen.push(h), assertNever()) })
+    const cred = Credential.deserialize(await m.createCredential({ challenge: challenge() } as never))
+    expect(cred.payload).toMatchObject({ type: 'hold', callId, txHash: p.sent[0] })
+    expect(seen).toEqual([{ callId, serviceId, txHash: p.sent[0], amount: 10_000n, escrow }])
+  })
+
+  it('names the callId and the hold transaction when a sent hold is not confirmed', async () => {
+    const p = payer({ confirm: false })
+    const m = fermata({ wallet: p.wallet, client: p.client, trustedVerifiers: [verifier], escrows: [escrow] })
+    const err = await m.createCredential({ challenge: challenge() } as never).catch((e: Error) => e)
+    expect(String(err)).toContain(callId)
+    expect(String(err)).toContain(p.sent[0])
+    expect(String(err)).toMatch(/reclaim/)
   })
 
   it('pays one call at a time per agent: concurrent payments never share a permit or transaction nonce', async () => {
@@ -172,3 +226,7 @@ describe('fermata client method', () => {
     expect(used).toEqual([0n, 1n, 2n]) // each permit signed after the previous hold was mined
   })
 })
+
+function assertNever(): never {
+  throw new Error('onHold failed')
+}

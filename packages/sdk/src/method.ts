@@ -34,15 +34,16 @@ export const fermataMethod = Method.from({
 export type FermataRequest = z.output<(typeof fermataMethod)['schema']['request']>
 
 /**
- * The Payment-Receipt of a call paid with `fermata`: mppx's receipt plus the call's Fermata fields.
- * Read it with `Receipt.fromResponse(res) as FermataReceipt`.
+ * The Payment-Receipt of a call paid with `fermata` through a Fermata gateway: mppx's receipt plus the
+ * call fields the gateway adds (fermataServer() alone does not add them). Read it with
+ * `Receipt.fromResponse(res) as FermataReceipt`.
  */
 export type FermataReceipt = Receipt.Receipt & {
-  callId: Hex
-  holdTx: Hex
+  callId?: Hex
+  holdTx?: Hex
   /** The release or refund transaction, once the call is settled. */
-  txHash: Hex | null
-  presentationHash: Hex | null
+  txHash?: Hex | null
+  presentationHash?: Hex | null
   /** `AWAITING_TIMEOUT`: no proof, so the escrow refunds the agent once the settlement window closes. */
-  outcome: 'DELIVERED' | 'FAILED' | 'AWAITING_TIMEOUT' | null
+  outcome?: 'DELIVERED' | 'FAILED' | 'AWAITING_TIMEOUT' | null
 }

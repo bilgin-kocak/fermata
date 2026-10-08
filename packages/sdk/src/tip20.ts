@@ -14,6 +14,7 @@ import {
   type TransactionReceipt,
 } from 'viem'
 import { MODERATO, TEMPO } from './chain.ts'
+import type { AnyPublicClient } from './clients.ts'
 
 /** Moderato (42431) and Anvil's Tempo emulation share the chain id. Fees are paid in USD stablecoins. */
 export function tempoChain(rpc: string) {
@@ -64,13 +65,14 @@ const permitTypes = {
  * checked against the token's own DOMAIN_SEPARATOR, so a wrong assumption fails here, not on-chain.
  */
 export async function signPermit(
-  client: PublicClient,
+  anyClient: AnyPublicClient,
   token: Address,
   owner: LocalAccount,
   spender: Address,
   value: bigint,
   deadline: bigint,
 ): Promise<{ v: number; r: Hex; s: Hex }> {
+  const client = anyClient as PublicClient
   const [name, nonce, onChain, chainId] = await Promise.all([
     client.readContract({ address: token, abi: tip20Abi, functionName: 'name' }),
     client.readContract({ address: token, abi: tip20Abi, functionName: 'nonces', args: [owner.address] }),
