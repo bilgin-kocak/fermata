@@ -99,7 +99,7 @@ event TransferWithMemo(address indexed from, address indexed to, uint256 amount,
 | Token `name()` | genesis sets `name == symbol` for the testnet tokens (e.g. `"pathUSD"`); read `name()` on-chain before signing a permit | — |
 | Contracts calling `transferFromWithMemo` | no caller-type restriction. Checks: not paused; recipient not zero and not a TIP-20 address (`InvalidRecipient`); TIP-403 policy allows `from` and `to`; allowance; since T6 (testnet 2026-06-18) the recipient's receive policy | — |
 | Receive policies (T6) | a transfer blocked by a receive policy **still succeeds** but credits `ReceivePolicyGuard` at `0xB10C000000000000000000000000000000000000` — confirm the `Transfer` recipient. Genesis tokens start at `transferPolicyId = 1` (always allow), unpaused; "If an address has no receive policy, all transfers and mints are allowed" | — |
-| Strict calldata (T11, testnet 2026-09-09) | precompile calls must use exact ABI encoding; trailing bytes are rejected until T12 | — |
+| Strict calldata (T11, testnet 2026-09-09) | precompile calls had to use exact ABI encoding, with trailing bytes rejected; T12 (testnet 2026-10-08, TIP-1116) accepts trailing calldata bytes again. Fermata's calls use exact encoding either way | — |
 
 ## 6. Testnet stablecoins
 
@@ -570,3 +570,19 @@ https://fermata-production-9378.up.railway.app. The numbers are the README's.
 | Prove time (MPC-TLS) | p50 0.56 s |
 | `pnpm demo:mcp` | 6/6 |
 | `deploy/smoke.sh` | 7/7 |
+
+### 15.9 Re-test after Tempo's T12 upgrade (2026-10-08)
+
+T12 activated on Moderato at 2026-10-08 14:00 UTC (timestamp 1791468000; Tempo node v1.16.0). It
+adds a rule that a native-contract call needs more than 2,300 gas left before a storage write, and
+accepts trailing calldata bytes again (TIP-1116); TIP-20 permit and `transferWithMemo` are unchanged.
+Re-tested against the live demo from 18:31 UTC, after the fork:
+
+| Check | Result |
+|---|---|
+| `deploy/smoke.sh` | 7/7 (release, proven-failure refund and the npm vendor, each proof re-verified) |
+| Release through the SDK (quote-ok) | DELIVERED, HTTP 200, 5.6 s |
+| Proven-failure refund (quote-500) | FAILED, HTTP 500, 5.9 s |
+| Timeout refund (quote-hang, 30 s window) | no proof; `claimTimeout` by the gateway's sweeper, hold status TimedOut |
+| `pnpm reverify` (released and refunded calls) | VERIFIED, both, against the chain |
+| `npx -y fermata-mcp` 0.1.3, new wallet | funded by the testnet faucet; paid call released; `fermata_verify` ok |

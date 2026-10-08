@@ -413,7 +413,10 @@ and the SDK and MCP server packaged for npm ([Use it in your project](#use-it-in
 **Tempo Moderato: done** (2026-10-01). Escrow deployed, `escrow:roundtrip`, gateway e2e (4/4),
 `demo:cases` (3/3) and the 100-call `demo:load` all pass on Moderato; the `mppx validate` payment
 phase passes too (88 passed, 0 failed; 4 warnings are the vendor's 404 for a quote request with no
-`?symbol=`). The product demo video is recorded on the live demo on Moderato. Nothing is faked; see [`docs/PLAN.md`](docs/PLAN.md).
+`?symbol=`). The product demo video is recorded on the live demo on Moderato. After Tempo's T12
+upgrade of Moderato (2026-10-08) the live demo was re-tested: release, proven-failure refund,
+timeout refund, offline re-verification and `npx -y fermata-mcp` all pass (FACTS §15.9). Nothing is
+faked; see [`docs/PLAN.md`](docs/PLAN.md).
 
 **Freeze:** the demo, the video and this README are frozen from **2026-10-09** (72 h before the
 2026-10-12 deadline). After the freeze, only bug fixes that a failing `pnpm demo:cases` justifies.
