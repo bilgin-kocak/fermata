@@ -104,6 +104,12 @@ class FakeAttestor implements Attestor {
     this.calls.push(input)
     return this.next(input)
   }
+  verifyCalls: Hex[] = []
+  verifyNext: (callId: Hex) => AttestResult | { kind: 'missing' } = () => ({ kind: 'missing' })
+  async verify(callId: Hex) {
+    this.verifyCalls.push(callId)
+    return this.verifyNext(callId)
+  }
   async health() {
     return { signer, escrow, chainId: 42431 }
   }
@@ -146,11 +152,16 @@ const config = (over: Partial<GatewayConfig> = {}): GatewayConfig => ({
   ...over,
 })
 
-async function build(over: Partial<GatewayConfig> = {}) {
+async function build(over: Partial<GatewayConfig> = {}, env: Record<string, string> = {}) {
   store = new CallStore(mkdtempSync(path.join(tmpdir(), 'fermata-gw-')))
+  return restart(env, over)
+}
+
+/** Another gateway process on the same call store (a restart: empty in-memory state). */
+function restart(env: Record<string, string> = {}, over: Partial<GatewayConfig> = {}) {
   return createGateway({
     config: { ...config(over), storageDir: store.dir }, chain, publicClient: chain.publicClient(), attestor, store,
-    secretKey: 'unit-test-secret-key-at-least-32-bytes!!', env: { VENDOR_TOKEN: 'Bearer vendor-secret' }, log: () => {},
+    secretKey: 'unit-test-secret-key-at-least-32-bytes!!', env: { VENDOR_TOKEN: 'Bearer vendor-secret', ...env }, log: () => {},
   })
 }
 
@@ -438,6 +449,14 @@ describe('gateway MCP endpoint', () => {
     expect(attestor.calls[0]!.headers).toMatchObject({ authorization: 'Bearer vendor-secret' })
   })
 
+  it('a request too large to prove is refused before any challenge: nothing is charged', async () => {
+    const res = (await (await mcpClient()).callTool({ name: 'call_quote', arguments: { path: `/v1/quote?symbol=${'A'.repeat(3_000)}` } })) as unknown as ToolResult
+    expect(res.isError).toBe(true)
+    expect(res.content[0]!.text).toMatch(/too large to prove.*nothing was charged/)
+    expect(chain.holds.size).toBe(0)
+    expect(attestor.calls).toEqual([])
+  })
+
   it('FAILED: a proven 500 comes back as a tool error and the agent is refunded', async () => {
     attestor.next = (i) => verdict(i.callId, 2, { status: 500, body: '{"error":"boom"}' })
     const res = (await (await mcpClient()).callTool({ name: 'call_quote', arguments: { path: '/v1/quote?symbol=BTC-USD' } })) as unknown as ToolResult
@@ -566,3 +585,145 @@ describe('onboarded services at startup', () => {
   })
 })
 
+
+describe('money paths (hardening)', () => {
+  const quote = `/s/${sid}/v1/quote?symbol=BTC-USD`
+
+  it('refuses a paid request with too little of the window left: no vendor call, no record, no free answer', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{"price":1}' })
+    chain.time = 1_110n // the hold's window (heldAt 900, deadline 1120) has 10 s left; 15 s are needed
+    const res = await agentFetch()(quote)
+    expect(res.status).toBe(402)
+    expect(attestor.calls).toEqual([])
+    expect(await store.list()).toEqual([])
+  })
+
+  it('a restart after the verdict is signed still pays the vendor (not a timeout refund)', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    const settle = chain.settle.bind(chain)
+    chain.settle = () => new Promise(() => {}) // the process dies while the settle is in flight
+    void agentFetch()(quote)
+    let record: Awaited<ReturnType<typeof store.get>>
+    for (let i = 0; i < 50 && !record?.signature; i++) {
+      await new Promise((ok) => setTimeout(ok, 10))
+      record = (await store.list())[0]
+    }
+    expect(record).toMatchObject({ status: 'settle-pending', outcome: 'DELIVERED' })
+    chain.settle = settle
+    const after = await restart()
+    await after.sweep()
+    expect(chain.settled).toEqual([{ callId: record!.callId, outcome: 1 }])
+    expect(chain.timeouts).toEqual([])
+    expect((await store.get(record!.callId))?.status).toBe('released')
+  })
+
+  it('an RPC node that does not show the hold yet never closes the call', async () => {
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'vendor never answered' })
+    const callId = receiptOf(await agentFetch()(quote)).callId as Hex
+    const held = chain.holds.get(callId.toLowerCase())!
+    chain.holds.delete(callId.toLowerCase()) // a lagging node: escrow status 0
+    await gw.sweep()
+    expect((await store.get(callId))?.status).toBe('awaiting-timeout')
+    chain.holds.set(callId.toLowerCase(), held)
+    chain.time = 1_121n
+    expect(await gw.sweep()).toEqual([callId]) // refunded as it should be
+    // A hold that never appears is given up only after an hour.
+    const ghost = keccak256(toHex('ghost')) as Hex
+    const old = new Date(Date.now() - 2 * 3_600_000).toISOString()
+    await store.put({ callId: ghost, serviceId: sid, method: 'GET', target: '/', requestHash: `0x${'33'.repeat(32)}`, holdTx: keccak256(toHex('g')), deadline: '0', status: 'held', createdAt: old, updatedAt: old })
+    await gw.sweep()
+    expect((await store.get(ghost))?.status).toBe('closed')
+  })
+
+  it('an attestor failure after proving is recovered from the stored proof inside the window', async () => {
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'attestor HTTP 500', retryable: true })
+    const callId = receiptOf(await agentFetch()(quote)).callId as Hex
+    expect(await store.get(callId)).toMatchObject({ status: 'awaiting-timeout', recoverable: true })
+    attestor.verifyNext = (id) => verdict(id, 1, { status: 200, body: '{}' })
+    await gw.sweep()
+    expect(attestor.verifyCalls).toEqual([callId])
+    expect(chain.settled).toEqual([{ callId, outcome: 1 }])
+    expect((await store.get(callId))?.status).toBe('released')
+  })
+
+  it('no stored proof: recovery stops and the agent is refunded by timeout; a vendor failure is never retried', async () => {
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'attestor unreachable', retryable: true })
+    const a = receiptOf(await agentFetch()(quote)).callId as Hex
+    await gw.sweep() // verify → missing
+    expect(await store.get(a)).toMatchObject({ recoverable: false, recoverTries: 1 })
+    await gw.sweep()
+    expect(attestor.verifyCalls).toEqual([a])
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'vendor never answered' })
+    const b = receiptOf(await agentFetch()(quote)).callId as Hex
+    await gw.sweep()
+    expect(attestor.verifyCalls).toEqual([a]) // b is the vendor's failure: nothing to recover
+    chain.time = 1_121n
+    expect((await gw.sweep()).sort()).toEqual([a, b].sort())
+  })
+
+  it('a credential already served is refused after a restart (the call record survives, the replay store does not)', async () => {
+    // The hold is still open (its settle failed, retried by the sweeper): the credential would validate again.
+    chain.settleFails = 1
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    expect((await agentFetch()(quote)).status).toBe(200)
+    const cred = lastCredential!
+    const after = await restart()
+    const replay = await after.app.request(`${BASE}${quote}`, { headers: { authorization: cred } })
+    expect(replay.status).toBe(409)
+    expect(await replay.json()).toMatchObject({ error: 'call already served', status: 'settle-pending' })
+    expect(attestor.calls).toHaveLength(1) // no second vendor call, no second answer
+    expect((await store.list())[0]?.signature).toBeTruthy() // the stored verdict was not wiped
+  })
+
+  it('refuses requests that could never be proved before any challenge: too large (413), not UTF-8 (415)', async () => {
+    const big = await gw.app.request(`${BASE}/s/${sid}/v1/quote?symbol=${'A'.repeat(3_000)}`)
+    expect(big.status).toBe(413)
+    expect(big.headers.get('www-authenticate')).toBeNull()
+    const binary = await gw.app.request(`${BASE}/s/${sid}/v1/quote`, { method: 'POST', body: new Uint8Array([0xff, 0xfe, 0x00, 0x80]) })
+    expect(binary.status).toBe(415)
+    expect(binary.headers.get('www-authenticate')).toBeNull()
+    const huge = await gw.app.request(`${BASE}/s/${sid}/v1/quote`, { method: 'POST', body: 'x'.repeat(100_000), headers: { 'content-length': '100000' } })
+    expect(huge.status).toBe(413)
+    expect(attestor.calls).toEqual([])
+  })
+
+  it('public mode rate-limits paid routes and proof re-verification per visitor', async () => {
+    gw = await build({}, { GATEWAY_PUBLIC: '1', GATEWAY_RATE_PER_MIN: '2', GATEWAY_VERIFY_RATE_PER_MIN: '1' })
+    const hit = () => gw.app.request(`${BASE}${quote}`)
+    expect((await hit()).status).toBe(402)
+    expect((await hit()).status).toBe(402)
+    const third = await hit()
+    expect(third.status).toBe(429)
+    expect(third.headers.get('retry-after')).toBeTruthy()
+    const v = () => gw.app.request(`${BASE}/proofs/0x${'12'.repeat(32)}/verify`, { method: 'POST' })
+    expect((await v()).status).toBe(404)
+    expect((await v()).status).toBe(429)
+  })
+})
+
+describe('call store', () => {
+  it('serves list() from memory after one directory read; a new store on the same directory sees every call', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'fermata-store-'))
+    const a = new CallStore(dir)
+    const now = (i: number) => new Date(Date.UTC(2026, 10, 16, 0, 0, i)).toISOString()
+    const rec = (i: number) => ({ callId: keccak256(toHex(`c${i}`)) as Hex, serviceId: sid, method: 'GET', target: '/', requestHash: `0x${'33'.repeat(32)}` as Hex, holdTx: keccak256(toHex('h')), deadline: '0', status: 'held' as const, createdAt: now(i), updatedAt: now(i) })
+    // Writes racing the first directory read are not lost.
+    await Promise.all([a.list(), a.put(rec(1)), a.put(rec(2))])
+    expect((await a.list()).map((r) => r.createdAt)).toEqual([now(1), now(2)])
+    await a.put(rec(3))
+    await a.update(rec(1).callId, { status: 'released' })
+    expect((await a.list(2)).map((r) => r.createdAt)).toEqual([now(2), now(3)]) // newest two, oldest first
+    const b = new CallStore(dir) // a restart
+    expect((await b.list()).map((r) => [r.createdAt, r.status])).toEqual([[now(1), 'released'], [now(2), 'held'], [now(3), 'held']])
+  })
+
+  it('GET /calls returns the newest calls, oldest first, with a limit', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    const pay = agentFetch()
+    for (let i = 0; i < 3; i++) await pay(`/s/${sid}/v1/quote?symbol=BTC-USD`)
+    const all = (await (await gw.app.request(`${BASE}/calls`)).json()) as { callId: string }[]
+    expect(all).toHaveLength(3)
+    const two = (await (await gw.app.request(`${BASE}/calls?limit=2`)).json()) as { callId: string }[]
+    expect(two.map((c) => c.callId)).toEqual(all.slice(1).map((c) => c.callId))
+  })
+})

@@ -63,7 +63,20 @@ export class ViemChain implements GatewayChain {
     readonly relayer: WalletClient<Transport, Chain, Account>,
     readonly escrow: Address,
     readonly chainId: number,
+    /**
+     * Longest wait for one receipt. Writes are serialised, so a stuck transaction must not hold every
+     * settle behind it past its window (viem's default is 180 s; windows are often 120 s). A timed-out
+     * settle stays settle-pending and the sweeper reads the hold's status on its next pass.
+     */
+    readonly receiptTimeoutMs = 20_000,
   ) {}
+
+  /** Runs `fn` in the relayer's write queue: anything else sending from the relayer's key must use it. */
+  enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn)
+    this.queue = next.catch(() => undefined)
+    return next
+  }
 
   service(serviceId: Hex) {
     return getService(this.client, this.escrow, serviceId)
@@ -78,18 +91,16 @@ export class ViemChain implements GatewayChain {
   }
 
   private write(functionName: 'settle' | 'claimTimeout', args: readonly unknown[]): Promise<TxResult> {
-    const run = async (): Promise<TxResult> => {
+    return this.enqueue(async (): Promise<TxResult> => {
+      let txHash: Hex | undefined
       try {
-        const txHash = await this.relayer.writeContract({ address: this.escrow, abi: fermataEscrowAbi, functionName, args } as never)
-        const receipt = await this.client.waitForTransactionReceipt({ hash: txHash })
+        txHash = await this.relayer.writeContract({ address: this.escrow, abi: fermataEscrowAbi, functionName, args } as never)
+        const receipt = await this.client.waitForTransactionReceipt({ hash: txHash, timeout: this.receiptTimeoutMs })
         return receipt.status === 'success' ? { ok: true, txHash } : { ok: false, txHash, error: 'transaction reverted' }
       } catch (e) {
-        return { ok: false, error: reason(e) }
+        return { ok: false, txHash, error: reason(e) }
       }
-    }
-    const next = this.queue.then(run, run)
-    this.queue = next.catch(() => undefined)
-    return next
+    })
   }
 
   settle(callId: Hex, verdict: Verdict, signature: Hex) {

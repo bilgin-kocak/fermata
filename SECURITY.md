@@ -18,6 +18,37 @@ not been reviewed by a third party. Do not use it with real funds.
 - **Dependencies.** TLSNotary `v0.1.0-alpha.15` is alpha software consumed as a git dependency;
   `mppx@0.11.0` is an early release.
 
+## Hardening (2026-11)
+
+A code review after the hackathon found, and this repository fixed, these issues in the gateway and
+SDK (regression tests in `apps/gateway/test` and `packages/sdk/test`):
+
+- **A free answer near the deadline.** A credential presented just before the hold's window closed
+  was served, the settlement missed the window, and the agent reclaimed the hold by timeout. The
+  server now needs `minRemainingSeconds` (15 s, at most a third of the window) left.
+- **A verdict lost on restart.** A signed verdict is stored as `settle-pending` in the same write, so
+  the sweeper settles it after a crash instead of refunding a call the vendor delivered.
+- **RPC lag read as final.** An escrow status of "none" (a node behind) is retried, never closed.
+- **Proofs never settled after an attestor failure.** The sweeper asks the attestor to verify the
+  stored presentation again inside the window; settle and claim receipts time out after 20 s so one
+  stuck transaction does not hold every settle past its window; onboarding registrations from the
+  relayer key share its write queue.
+- **Replay after a restart.** A credential whose call already has a record is refused (409).
+- **Unprovable requests.** Bodies that are not UTF-8, or requests over 2048 bytes, get 413/415 before
+  any challenge, so no one pays for a call that can only time out.
+- **Public-demo abuse.** The demo agent pays onboarded services only up to 0.01 (anyone can list one
+  at up to 1.00 with their own payout); body-size limits; per-visitor rate limits on paid routes and
+  proof re-verification.
+
+Known and not yet fixed:
+
+- **Front-running a call ID.** `hold` keys records by `callId` alone: someone who sees an agent's
+  pending hold can hold the same `callId` first (against a service of their own), and the agent's
+  transaction reverts. The agent loses gas, not funds. Fixing it changes the contract interface.
+- **Score gaming.** A proven 4xx caused by the agent's own input counts as a vendor failure, and a
+  vendor that hangs instead of answering 5xx is counted as a timeout, which the score leaves out.
+- **Unrecoverable refunds.** A refund to an agent that a TIP-20 issuer has blacklisted reverts.
+
 ## Keys
 
 Private keys live only in `.env` (git-ignored; `pnpm keys:init` creates testnet keys) and never in

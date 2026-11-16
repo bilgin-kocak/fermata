@@ -41,9 +41,11 @@ export type McpDeps = {
     svc: never,
     req: { method: string; target: string; headers: Headers; body: Uint8Array },
     credential: { challenge: { request: unknown }; payload: unknown },
-  ) => Promise<{ response: Response; record: CallRecord }>
+  ) => Promise<{ response: Response; record: CallRecord; replayed?: boolean }>
   /** True while proving is saturated: new payers are turned away before they pay. */
   saturated?: () => boolean
+  /** Why a request could never be proved (too large, not UTF-8), checked before any challenge. */
+  provable?: (target: string, body: Uint8Array) => { error: string } | undefined
 }
 
 /** The label packed into a serviceId (owner ‖ 12-byte label), when it is printable. */
@@ -161,6 +163,8 @@ export function mcpHandler(deps: McpDeps) {
     const target = targetFor(toolFor(svc), args)
     const body = new Uint8Array()
     const rh = requestHash(svc.serviceId, 'GET', target, body)
+    const unprovable = deps.provable?.(target, body)
+    if (unprovable) return { content: [text(`${unprovable.error}; nothing was charged`)], isError: true }
     if (!meta?.[Mcp.credentialMetaKey] && deps.saturated?.()) {
       return { content: [text('busy: other calls are being proved; nothing was charged, retry in a few seconds')], isError: true }
     }
@@ -171,7 +175,10 @@ export function mcpHandler(deps: McpDeps) {
     const raw = meta?.[Mcp.credentialMetaKey]
     if (!raw) throw new Error('paid without a credential')
     const credential = typeof raw === 'string' ? Credential.deserialize(raw) : Credential.deserialize(Credential.serialize(raw as never))
-    const { response, record } = await deps.fulfil(svc as never, { method: 'GET', target, headers: new Headers({ accept: 'application/json' }), body }, credential)
+    const { response, record, replayed } = await deps.fulfil(svc as never, { method: 'GET', target, headers: new Headers({ accept: 'application/json' }), body }, credential)
+    if (replayed) {
+      return { content: [text(`This payment was already used for call ${record.callId} (status ${record.status}): one credential pays for one call. Check it with fermata_call.`)], isError: true }
+    }
     const vendorBody = await response.text()
     const settled =
       record.status === 'released' ? `DELIVERED → released to the vendor (settle tx ${link(record.settleTx)})`

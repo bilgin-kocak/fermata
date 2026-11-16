@@ -119,6 +119,24 @@ describe('fermata server method', () => {
     await expect(validate(late as never)).rejects.toThrow(/window closed/)
   })
 
+  it('refuses a hold with too little of its window left to prove and settle (no free answer near the deadline)', async () => {
+    const at = (now: bigint, hold: Record<string, bigint> = {}) => ({
+      ...(fakeClient() as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>),
+      getBlock: async () => ({ timestamp: now }),
+      readContract: async ({ functionName }: { functionName: string }) =>
+        functionName === 'getHold' ? { status: 1, heldAt: 1_000n, deadline: 1_120n, ...hold } : { token, verifier, pricePerCall: 10_000n, settlementWindow: 120 },
+    })
+    // 120 s window: 15 s must be left.
+    await expect(validate(at(1_110n) as never)).rejects.toThrow(/only 10 s .*\(15 s needed/)
+    await expect(validate(at(1_105n) as never)).resolves.toBeTruthy()
+    // 30 s window: the margin is capped at a third of it (10 s), so short windows still work.
+    await expect(validate(at(1_018n, { heldAt: 1_000n, deadline: 1_030n }) as never)).resolves.toBeTruthy()
+    await expect(validate(at(1_021n, { heldAt: 1_000n, deadline: 1_030n }) as never)).rejects.toThrow(/10 s needed/)
+    // The margin is configurable; 0 restores the old behaviour (open until the deadline).
+    const server = fermataServer({ client: at(1_119n) as never, escrow, secretKey: SECRET, minRemainingSeconds: 0 })
+    await expect(server.validate!({ credential: credential(), request } as never)).resolves.toBeTruthy()
+  })
+
   it('rejects a credential for another callId or escrow', async () => {
     await expect(validate(fakeClient(), credential({ callId: keccak256('0x09') }))).rejects.toThrow(/callId/)
     await expect(validate(fakeClient(), credential({ escrow: token }))).rejects.toThrow(/another escrow/)

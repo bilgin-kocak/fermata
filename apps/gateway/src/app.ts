@@ -2,14 +2,16 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { Credential, Receipt } from 'mppx'
 import { discovery } from 'mppx/hono'
 import { Mppx, tempo } from 'mppx/server'
 import { isAddressEqual, parseEventLogs, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
 import { aggregateScores, eventually, fermataEscrowAbi, fermataServer, MODERATO, originHash, predicateHash, requestHash, serviceLabelOf, type EscrowLog } from 'fermata-sdk'
-import type { Attestor, ProvedResponse } from './attestor.ts'
+import type { AttestResult, Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
+import { clientIp, RateLimiter } from './limits.ts'
 import { mcpHandler, toolFor } from './mcp.ts'
 import { onboardRoutes, type OnboardDeps, type Registered, type RegisterInput } from './onboard.ts'
 import { publicRoutes, type DemoDeps } from './public.ts'
@@ -104,7 +106,12 @@ export async function createGateway(deps: GatewayDeps) {
   const log = deps.log ?? ((m: string) => console.log(`[gateway] ${m}`))
   const services = await loadServices(deps)
   const { chain, store, attestor } = deps
-  const fermataHandler = fermataServer({ client: deps.publicClient, escrow: chain.escrow, secretKey: deps.secretKey })
+  const env = (name: string) => deps.env?.[name] ?? process.env[name]
+  const publicMode = env('GATEWAY_PUBLIC') === '1'
+  // A paid request must leave this much of the hold's window to prove and settle (capped at a third
+  // of the window): otherwise the agent gets the answer and the settlement misses the window.
+  const minRemainingSeconds = Number(env('GATEWAY_MIN_REMAINING_S') ?? 15)
+  const fermataHandler = fermataServer({ client: deps.publicClient, escrow: chain.escrow, secretKey: deps.secretKey, minRemainingSeconds })
   const tempoHandler = tempo.charge({ testnet: true } as never)
   const mppx = Mppx.create({ secretKey: deps.secretKey, realm: deps.config.realm, methods: [fermataHandler, tempoHandler] })
 
@@ -172,8 +179,15 @@ export async function createGateway(deps: GatewayDeps) {
     svc: Service,
     req: { method: string; target: string; headers: Headers; body: Uint8Array },
     credential: { challenge: { request: unknown }; payload: unknown },
-  ): Promise<{ response: Response; record: CallRecord }> {
+  ): Promise<{ response: Response; record: CallRecord; replayed?: boolean }> {
     const callId = (credential.challenge.request as { callId: Hex }).callId
+    // One credential pays for one call. mppx's replay store is in memory, so after a restart the call
+    // record on disk is what refuses a credential that was already served.
+    const existing = await store.get(callId)
+    if (existing) {
+      const response = Response.json({ error: 'call already served', detail: 'this hold was already redeemed: one credential pays for one call', callId, status: existing.status }, { status: 409 })
+      return { response, record: existing, replayed: true }
+    }
     inFlight.add(callId.toLowerCase())
     try {
       return await prove(svc, req, credential, callId)
@@ -208,7 +222,8 @@ export async function createGateway(deps: GatewayDeps) {
       // never a verdict. Only claimTimeout can end the hold; the sweeper sends it after the window.
       const detail = result.kind === 'rejected' ? `${result.check}: ${result.detail}` : result.detail
       console.error(`[gateway] call ${callId} has NO VERDICT (${result.kind}: ${detail}); awaiting timeout at ${hold?.deadline ?? '?'}`)
-      record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}` })
+      const recoverable = result.kind === 'no-transcript' && !!result.retryable
+      record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}`, ...(recoverable ? { recoverable, recoverTries: 0 } : {}) })
       const response = Response.json(
         { error: result.kind, detail, callId, status: 'awaiting-timeout', refundAfter: hold?.deadline.toString() ?? null, reclaim: 'claimTimeout(callId) on the escrow after refundAfter' },
         { status: result.kind === 'rejected' ? 502 : 504 },
@@ -216,7 +231,18 @@ export async function createGateway(deps: GatewayDeps) {
       return { response, record }
     }
 
-    record = await store.update(callId, {
+    record = await settleVerdict(await recordVerdict(callId, result))
+    return { response: provedToResponse(result.response), record }
+  }
+
+  /**
+   * Stores a signed verdict as `settle-pending` in the same write: if the process dies before the
+   * settle is mined, the sweeper still settles it inside the window (a `held` record would only be
+   * refunded by timeout, though the vendor delivered).
+   */
+  function recordVerdict(callId: Hex, result: Extract<AttestResult, { kind: 'verdict' }>) {
+    return store.update(callId, {
+      status: 'settle-pending',
       outcome: result.signed.outcome,
       failures: result.signed.failures,
       verdict: result.signed.verdict,
@@ -225,9 +251,42 @@ export async function createGateway(deps: GatewayDeps) {
       proveMs: result.proveMs,
       notaryBytes: result.notaryBytes,
       signer: result.signed.signer,
+      error: undefined,
+      recoverable: undefined,
     })
-    record = await settleVerdict(record)
-    return { response: provedToResponse(result.response), record }
+  }
+
+  /**
+   * A call left without a verdict because the attestor failed (not the vendor): the presentation may
+   * be stored, so ask the attestor to verify it again and settle while the window is open. Up to 3 tries.
+   */
+  async function recover(record: CallRecord) {
+    const tries = (record.recoverTries ?? 0) + 1
+    const result = await attestor.verify(record.callId)
+    if (result.kind === 'verdict') {
+      log(`call ${record.callId.slice(0, 10)} recovered: stored proof verified (${result.signed.outcome})`)
+      await settleVerdict(await recordVerdict(record.callId, result))
+    } else if (result.kind === 'missing' || result.kind === 'rejected') {
+      await store.update(record.callId, { recoverable: false, recoverTries: tries })
+    } else {
+      await store.update(record.callId, { recoverable: tries < 3, recoverTries: tries })
+    }
+  }
+
+  // The attestor's MPC-TLS budget for the request it sends (4096 bytes with headers): a larger request,
+  // or a body that is not UTF-8 text, can never be proved, so it is refused before anyone pays for it.
+  const maxRequestBytes = Number(env('GATEWAY_MAX_REQUEST_BYTES') ?? 2048)
+  const utf8 = new TextDecoder('utf-8', { fatal: true })
+  function provable(target: string, body: Uint8Array): { status: 413 | 415; error: string } | undefined {
+    if (Buffer.byteLength(target) + body.byteLength > maxRequestBytes) {
+      return { status: 413, error: `request too large to prove: path, query and body must total at most ${maxRequestBytes} bytes` }
+    }
+    try {
+      utf8.decode(body)
+    } catch {
+      return { status: 415, error: 'request body must be UTF-8 text: binary bodies cannot be proved' }
+    }
+    return undefined
   }
 
   const app = new Hono()
@@ -236,6 +295,30 @@ export async function createGateway(deps: GatewayDeps) {
     log(`${c.req.method} ${c.req.path} failed: ${e.message}`)
     return c.json({ error: (e as { shortMessage?: string }).shortMessage ?? 'internal error' }, 500)
   })
+
+  // Request bodies are read in full before any payment check: cap them.
+  const tooLarge = (c: import('hono').Context) => c.json({ error: 'request body too large' }, 413)
+  app.use('/s/*', bodyLimit({ maxSize: 64 * 1024, onError: tooLarge }))
+  app.use('/mcp', bodyLimit({ maxSize: 64 * 1024, onError: tooLarge }))
+  app.use('/onboard/*', bodyLimit({ maxSize: 16 * 1024, onError: tooLarge }))
+  app.use('/demo/*', bodyLimit({ maxSize: 16 * 1024, onError: tooLarge }))
+  // Public mode: unpaid requests still cost RPC reads (a made-up hold tx is polled for seconds) and
+  // proof re-verification costs CPU, so both are rate-limited per visitor.
+  if (publicMode) {
+    const trustProxy = Number(env('GATEWAY_TRUST_PROXY') ?? 0)
+    const ipHeader = env('GATEWAY_CLIENT_IP_HEADER') || undefined
+    const ip = (c: import('hono').Context) =>
+      clientIp(c.req.raw.headers, (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress, trustProxy, ipHeader)
+    const limit = (limiter: RateLimiter) => async (c: import('hono').Context, next: () => Promise<void>) => {
+      const wait = limiter.take(ip(c))
+      if (wait > 0) return c.json({ error: 'too many requests; slow down', retryAfterMs: wait }, 429, { 'Retry-After': String(Math.ceil(wait / 1000)) })
+      await next()
+    }
+    const paidRequests = limit(new RateLimiter(Number(env('GATEWAY_RATE_PER_MIN') ?? 120), 60_000))
+    app.use('/s/*', paidRequests)
+    app.use('/mcp', paidRequests)
+    app.use('/proofs/:callId/verify', limit(new RateLimiter(Number(env('GATEWAY_VERIFY_RATE_PER_MIN') ?? 10), 60_000)))
+  }
 
   const paid = async (c: import('hono').Context) => {
     const sidParam = c.req.param('serviceId') ?? ''
@@ -246,15 +329,22 @@ export async function createGateway(deps: GatewayDeps) {
     const target = (url.pathname.slice(prefix.length) || '/') + url.search
     const method = c.req.method.toUpperCase()
     const body = new Uint8Array(await c.req.raw.clone().arrayBuffer())
+    const unprovable = provable(target, body)
+    if (unprovable) return c.json({ error: unprovable.error }, unprovable.status)
     const rh = requestHash(svc.serviceId, method, target, body)
 
     // Admission control: refuse new payers (no credential yet) while proving is saturated, so no one
-    // holds money for a call that would only wait out its window. Paid credentials are always served.
-    if (saturated() && !/^payment /i.test(c.req.header('authorization') ?? '')) {
+    // holds money for a call that would only wait out its window. Valid paid credentials are always
+    // served; an invalid one gets 503 rather than a fresh challenge while saturated.
+    const paying = /^payment /i.test(c.req.header('authorization') ?? '')
+    if (saturated() && !paying) {
       return c.json({ error: 'busy: other calls are being proved; retry in a few seconds' }, 503, { 'Retry-After': '5' })
     }
     const r = await offers(svc, rh)(c.req.raw)
-    if (r.status === 402) return r.challenge
+    if (r.status === 402) {
+      if (paying && saturated()) return c.json({ error: 'busy: other calls are being proved; retry in a few seconds' }, 503, { 'Retry-After': '5' })
+      return r.challenge
+    }
 
     const credential = Credential.fromRequest(c.req.raw)
     if (credential.challenge.method !== 'fermata') {
@@ -333,7 +423,11 @@ export async function createGateway(deps: GatewayDeps) {
     }))
   })
 
-  app.get('/calls', async (c) => c.json(await store.list()))
+  // Newest `limit` calls (default 500), oldest first as before.
+  app.get('/calls', async (c) => {
+    const limit = Math.min(Math.max(1, Number(c.req.query('limit') ?? 500) || 500), 5_000)
+    return c.json(await store.list(limit))
+  })
   app.get('/calls/:callId', async (c) => {
     const record = await store.get(c.req.param('callId')).catch(() => undefined)
     return record ? c.json(record) : c.json({ error: 'unknown call' }, 404)
@@ -496,13 +590,13 @@ export async function createGateway(deps: GatewayDeps) {
     })
   }
 
-  if (deps.demo) publicRoutes(app, { ...deps.demo, examplePath: (sid) => services.get(sid.toLowerCase())?.examplePath })
+  if (deps.demo) publicRoutes(app, { ...deps.demo, examplePath: (sid) => services.get(sid.toLowerCase())?.examplePath, priceOf: (sid) => services.get(sid.toLowerCase())?.price })
   else app.all('/demo/*', (c) => c.json({ enabled: false, error: 'public demo mode is off (GATEWAY_PUBLIC=1)' }, 404))
 
   const mcp = mcpHandler({
     app, services, escrow: chain.escrow, chainId: chain.chainId, secretKey: deps.secretKey, realm: deps.config.realm,
     explorer: deps.explorer === undefined ? (deps.config.rpc.includes('moderato') ? MODERATO.explorer : null) : deps.explorer,
-    fermataHandler, fulfil: fulfil as never, saturated,
+    fermataHandler, fulfil: fulfil as never, saturated, provable,
   })
   app.all('/mcp', (c) => mcp(c.req.raw))
 
@@ -544,8 +638,17 @@ export async function createGateway(deps: GatewayDeps) {
     const now = await chain.now()
     const done: string[] = []
     for (const record of await store.list()) {
-      if (FINAL.includes(record.status) || (record.status === 'held' && inFlight.has(record.callId.toLowerCase()))) continue
+      // A call being proved right now is this process's: never settle or claim it from here too.
+      if (FINAL.includes(record.status) || inFlight.has(record.callId.toLowerCase())) continue
       const hold = await chain.hold(record.callId)
+      if (hold.status === 0) {
+        // Not visible yet: an RPC node behind the one that showed the hold. Never final from one read;
+        // only a record whose hold has not appeared for an hour is given up.
+        if (Date.now() - Date.parse(record.createdAt) > 3_600_000) {
+          await store.update(record.callId, { status: 'closed', error: 'hold not found on-chain for over an hour (escrow status 0)' })
+        }
+        continue
+      }
       if (hold.status !== 1) {
         // Finalised by someone else (anyone may settle a signed verdict or claim a timeout).
         const status = hold.status === 2 ? 'released' : hold.status === 3 ? 'refunded' : hold.status === 4 ? 'timed-out' : 'closed'
@@ -554,6 +657,7 @@ export async function createGateway(deps: GatewayDeps) {
       }
       if (now <= hold.deadline) {
         if (record.status === 'settle-pending') await settleVerdict(record)
+        else if (record.status === 'awaiting-timeout' && record.recoverable) await recover(record)
         continue
       }
       const result = await chain.claimTimeout(record.callId)
