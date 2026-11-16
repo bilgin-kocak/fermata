@@ -176,7 +176,7 @@ if [ "${PUBLIC:-0}" = 1 ]; then
     + (if $npm == "" then {} else
       {npm: {serviceId: $npm, path: "/-/package/mppx/dist-tags", label: "Real API: npm registry", description: "The public npm registry over the open internet: a real 200, proved and paid."},
        "npm-404": {serviceId: (if $npm404 == "" then $npm else $npm404 end), path: "/-/package/no-such-package-fermata-zz/dist-tags", label: "Real API: npm 404", description: "npm\u0027s genuine 404 for a missing package: proved, and refunded."}} end)')
-  jq --argjson kinds "$KINDS" '.demo = {kinds: $kinds, perIpSeconds: (env.DEMO_PER_IP_SECONDS // "60" | tonumber), perIpPerDay: (env.DEMO_PER_IP_PER_DAY // "15" | tonumber), dailyCap: (env.DEMO_DAILY_CAP // "500" | tonumber)}' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+  jq --argjson kinds "$KINDS" '.demo = {kinds: $kinds, perIpSeconds: (env.DEMO_PER_IP_SECONDS // "60" | tonumber), perIpPerDay: (env.DEMO_PER_IP_PER_DAY // "15" | tonumber), dailyCap: (env.DEMO_DAILY_CAP // "500" | tonumber), maxServicePrice: (env.DEMO_MAX_PRICE // "10000")}' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   if [ "$CHAIN" = anvil ]; then
     DEMO_AGENT_PRIVATE_KEY=$(cast wallet new --json | jq -r '(.data // .) | if type == "array" then .[0] else . end | .private_key')
     cast send -q --rpc-url "$RPC" --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \

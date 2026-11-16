@@ -88,6 +88,6 @@ echo "E2E GATEWAY OK (logs in $LOGS)"
 
 if [ "${RUN_VALIDATOR:-1}" = 1 ]; then
   echo "== mppx validate (payment phase needs Moderato; informational)"
-  (cd apps/gateway && CLAUDECODE= node_modules/.bin/mppx validate "http://127.0.0.1:$GATEWAY_PORT/s/$SERVICE_OK/v1/quote?symbol=BTC-USD" --yes) > "$LOGS/validator.txt" 2>&1 || true
+  (cd apps/gateway && CLAUDECODE='' node_modules/.bin/mppx validate "http://127.0.0.1:$GATEWAY_PORT/s/$SERVICE_OK/v1/quote?symbol=BTC-USD" --yes) > "$LOGS/validator.txt" 2>&1 || true
   grep -iE "passed|failed|summary|✓|✗|×|fermata|tempo" "$LOGS/validator.txt" | tail -40 || true
 fi

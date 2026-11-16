@@ -9,7 +9,7 @@ import { serve } from '@hono/node-server'
 import { fetch as undiciFetch } from 'undici'
 import { Receipt } from 'mppx'
 import { Mppx } from 'mppx/client'
-import { createPublicClient, createWalletClient, http, type Address, type Hex } from 'viem'
+import { createPublicClient, createWalletClient, http, isAddressEqual, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { fermata, fermataEscrowAbi, originHash, predicateHash, serviceId as makeServiceId, tempoChain, tip20Abi, TOKENS } from 'fermata-sdk'
 import { probeVendor } from './onboard.ts'
@@ -32,6 +32,7 @@ const chainDef = tempoChain(config.rpc)
 const publicClient = createPublicClient({ chain: chainDef, transport: http(config.rpc) })
 const relayer = createWalletClient({ account: privateKeyToAccount(required('RELAYER_PRIVATE_KEY') as Hex), chain: chainDef, transport: http(config.rpc) })
 const chainId = await publicClient.getChainId()
+const gatewayChain = new ViemChain(publicClient, relayer, config.escrow, chainId, Number(process.env.GATEWAY_RECEIPT_TIMEOUT_MS ?? 20_000))
 
 const dispatcher = upstreamDispatcher(
   parseResolve(process.env.GATEWAY_RESOLVE),
@@ -82,7 +83,13 @@ function onboardDeps() {
   if (process.env.GATEWAY_PUBLIC !== '1') return undefined
   const predicateDir = required('ONBOARD_PREDICATE_DIR') // also passed to the attestor as a --predicate path
   mkdirSync(predicateDir, { recursive: true })
-  const operator = createWalletClient({ account: privateKeyToAccount((process.env.ONBOARD_OPERATOR_PRIVATE_KEY || required('RELAYER_PRIVATE_KEY')) as Hex), chain: chainDef, transport: http(config.rpc) })
+  const operatorKey = (process.env.ONBOARD_OPERATOR_PRIVATE_KEY || required('RELAYER_PRIVATE_KEY')) as Hex
+  const operator = createWalletClient({ account: privateKeyToAccount(operatorKey), chain: chainDef, transport: http(config.rpc) })
+  // The same key as the relayer: its registrations share the relayer's write queue, or their nonces
+  // race the settles. A separate operator key keeps registrations out of the settle path entirely.
+  const sharesRelayerKey = isAddressEqual(operator.account.address, relayer.account.address)
+  if (sharesRelayerKey) console.warn('[gateway] ONBOARD_OPERATOR_PRIVATE_KEY is unset: onboarding registers from the relayer key (queued behind settles); set a separate key')
+  const viaQueue = <T>(fn: () => Promise<T>) => (sharesRelayerKey ? gatewayChain.enqueue(fn) : fn())
   const labelTaken = async (label: string) => {
     const s = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [makeServiceId(operator.account.address, label)] })
     return s.token !== '0x0000000000000000000000000000000000000000'
@@ -103,13 +110,15 @@ function onboardDeps() {
       const { signer } = await attestor.health()
       const ph = predicateHash(input.predicate)
       writeFileSync(path.join(predicateDir, `${input.label}-${ph.slice(2, 10)}.json`), input.predicate)
-      const txHash = await operator.writeContract({
-        address: config.escrow,
-        abi: fermataEscrowAbi,
-        functionName: 'registerService',
-        args: [sid, input.payout, TOKENS.pathUSD as Address, input.price, 120, signer, ph, originHash(input.origin), reference.notaryKeyHash],
+      const { txHash, receipt } = await viaQueue(async () => {
+        const txHash = await operator.writeContract({
+          address: config.escrow,
+          abi: fermataEscrowAbi,
+          functionName: 'registerService',
+          args: [sid, input.payout, TOKENS.pathUSD as Address, input.price, 120, signer, ph, originHash(input.origin), reference.notaryKeyHash],
+        })
+        return { txHash, receipt: await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 60_000 }) }
       })
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
       if (receipt.status !== 'success') throw new Error(`registration reverted: ${txHash}`)
       await add({ serviceId: sid, upstream: input.origin, examplePath: input.examplePath, summary: input.summary, tool: { name: input.toolName, description: input.summary, path: input.examplePath } })
       return { serviceId: sid, txHash, endpoint: `/s/${sid}${input.examplePath}`, tool: input.toolName }
@@ -119,7 +128,7 @@ function onboardDeps() {
 
 const gateway = await createGateway({
   config,
-  chain: new ViemChain(publicClient, relayer, config.escrow, chainId),
+  chain: gatewayChain,
   publicClient: publicClient as never,
   attestor,
   store: new CallStore(config.storageDir),

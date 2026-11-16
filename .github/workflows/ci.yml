@@ -1,0 +1,79 @@
+# Checks every push to main and every pull request. No secrets, no live chain: unit, fuzz and
+# invariant tests only (the e2e and Moderato runs stay local: `pnpm demo:cases`, `deploy/smoke.sh`).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript (typecheck, SDK, gateway, builds)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm sdk:test
+      - run: pnpm gateway:test
+      - name: Build the npm packages and the dashboard
+        run: pnpm -F fermata-sdk build && pnpm -F fermata-mcp build && pnpm -F @fermata/dashboard build
+
+  contracts:
+    name: Contracts (forge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.3 # Tempo support needs ≥ 1.7.0; the `stable` tag is older (docs/FACTS.md §1)
+      - run: forge fmt --check
+      - run: forge test
+      - name: Core cases against the real TIP-20 precompile
+        run: FOUNDRY_PROFILE=tempo forge test --network tempo
+
+  attestor:
+    name: Attestor (Rust unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/attestor
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain (apps/attestor/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/attestor
+      - run: cargo test --release --locked --lib
+
+  shell:
+    name: Shell scripts (shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -S warning deploy/*.sh scripts/*.sh apps/vendor/*.sh

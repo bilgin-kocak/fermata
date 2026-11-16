@@ -590,3 +590,19 @@ Re-tested against the live demo from 18:31 UTC, after the fork:
 | Timeout refund (quote-hang, 30 s window) | no proof; `claimTimeout` by the gateway's sweeper, hold status TimedOut |
 | `pnpm reverify` (released and refunded calls) | VERIFIED, both, against the chain |
 | `npx -y fermata-mcp` 0.1.3, new wallet | funded by the testnet faucet; paid call released; `fermata_verify` ok |
+
+### 15.10 Hardening after a code review (2026-11-16, Anvil, public mode)
+
+Fixes listed in `SECURITY.md` ("Hardening"). Checked against a local stack
+(`PUBLIC=1 bash scripts/demo-stack.sh up --chain anvil`, `REAL_VENDORS` unset):
+
+| Check | Result |
+|---|---|
+| `pnpm sdk:test` / `pnpm gateway:test` | 53 / 115 pass; the 7 new gateway regression tests fail on the previous `app.ts` |
+| `forge test`, `FOUNDRY_PROFILE=tempo forge test --network tempo` | 51 / 5 pass (unchanged contract) |
+| `cargo test --release --locked --lib` (attestor) | 14 pass (unchanged attestor) |
+| `pnpm demo:cases` / `pnpm demo:mcp` / `deploy/smoke.sh` | 3/3, 6/6, 7/7 (the smoke test's npm call went to the real registry) |
+| Credential presented 111.8 s after the hold (120 s window) | 402 "only 10 s of the hold's settlement window are left (15 s needed to prove and settle)"; the vendor is not called |
+| Paid route with a 3,000-byte query / a non-UTF-8 body / a 100 KB body | 413 / 415 / 413, no challenge |
+| 125 unpaid requests from one address in a minute (limit 120) | 402 until the limit, then 429 with `Retry-After` |
+| `GET /calls?limit=2` | the 2 newest of 8 calls |

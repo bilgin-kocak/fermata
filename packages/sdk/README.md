@@ -101,8 +101,11 @@ const mppx = Mppx.create({
 ```
 
 It validates the agent's hold transaction (the `Held` event for this call, service, request and
-price on this escrow; the hold still open), claims each call ID once, and tolerates a load-balanced
-RPC a block behind. The claims live in `store`, in memory by default: when more than one instance
+price on this escrow; the hold still open, with at least `minRemainingSeconds` of its settlement
+window left, default 15 s, capped at a third of the window), claims each call ID once, and tolerates
+a load-balanced RPC a block behind. The margin means the server is never asked to answer a call it
+can no longer settle: without it, an agent could present its credential just before the window
+closes, receive the vendor's answer, and reclaim the hold by timeout. The claims live in `store`, in memory by default: when more than one instance
 serves the same escrow, pass a shared mppx `Store.AtomicStore`. Proving and settling are the
 gateway's job: see `apps/gateway` in the repository.
 
@@ -127,3 +130,9 @@ Fermata verifier signs each verdict and Fermata runs the notary: every verdict p
 anyone can re-verify offline, so a dishonest verdict is detectable, not prevented.
 
 MIT licensed.
+
+## Changes
+
+- **0.1.2:** `fermataServer({ minRemainingSeconds })`: a credential is refused (402) when less than
+  this much of the hold's settlement window is left (default 15 s, capped at a third of the window).
+- **0.1.1:** first public release.

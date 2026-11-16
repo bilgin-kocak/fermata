@@ -22,6 +22,12 @@ export type DemoConfig = {
   dailyCap?: number
   /** Below this (token base units) the guard tops up; default 1.00. */
   minBalance?: string
+  /**
+   * Most the demo agent pays for one call to a service visitors name by serviceId (onboarded vendors),
+   * in token base units; default 10000 (0.01). Anyone can list a service at up to 1.00 with their own
+   * payout, so without this cap the demo wallet would pay them.
+   */
+  maxServicePrice?: string
 }
 
 export type DemoResult = { status: number; callId?: Hex; outcome?: string | null; holdTx?: Hex; settleTx?: Hex | null; body?: string }
@@ -42,6 +48,8 @@ export type DemoDeps = {
   log?: (m: string) => void
   /** The example path of a served service (set by the gateway): lets visitors try onboarded services. */
   examplePath?: (serviceId: Hex) => string | undefined
+  /** The registered price of a served service (set by the gateway). */
+  priceOf?: (serviceId: Hex) => bigint | undefined
 }
 
 export function publicRoutes(app: Hono, deps: DemoDeps) {
@@ -52,6 +60,7 @@ export function publicRoutes(app: Hono, deps: DemoDeps) {
   const perIpDay = new RateLimiter(deps.config.perIpPerDay ?? 15, 86_400_000, now)
   const daily = new DailyCap(deps.config.dailyCap ?? 500, now)
   const minBalance = BigInt(deps.config.minBalance ?? '1000000')
+  const maxServicePrice = BigInt(deps.config.maxServicePrice ?? '10000')
   let busy: string | undefined
   let readOnly: string | undefined
   let lastGuard = 0
@@ -94,6 +103,12 @@ export function publicRoutes(app: Hono, deps: DemoDeps) {
     const path = serviceId && /^0x[0-9a-fA-F]{64}$/.test(serviceId) ? deps.examplePath?.(serviceId) : undefined
     const k = kind ? (Object.hasOwn(deps.config.kinds, kind) ? deps.config.kinds[kind] : undefined) : path !== undefined ? { serviceId: serviceId!, path, label: 'service', description: '' } : undefined
     if (!k) return c.json({ error: `unknown kind; one of ${Object.keys(deps.config.kinds).join(', ')}, or a served serviceId` }, 400)
+    if (!kind) {
+      const price = deps.priceOf?.(k.serviceId)
+      if (price === undefined || price > maxServicePrice) {
+        return c.json({ error: `the demo agent only pays services priced at most ${Number(maxServicePrice) / 1e6}; call this one from your own agent (npx fermata-mcp)` }, 400)
+      }
+    }
     await guard().catch(() => undefined)
     if (readOnly) return c.json({ error: readOnly }, 503)
     if (busy) return c.json({ error: 'another visitor’s call is being proved; try again in a few seconds', retryAfterMs: 3000 }, 429)

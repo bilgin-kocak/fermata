@@ -24,6 +24,14 @@ export type FermataServerOptions = {
   store?: Store.AtomicStore
   /** How long to look for a hold the RPC does not show yet (a node behind the agent's), in ms. Default 6000. */
   lagToleranceMs?: number
+  /**
+   * Least time, in seconds, that must be left in the hold's settlement window when the paid request
+   * arrives, so the server can prove and settle before it closes. Capped at a third of the window, so a
+   * short window still works. Default 15. A credential presented later is refused (402) before the
+   * vendor is called: otherwise an agent could wait until the window nearly closes, receive the answer,
+   * let the settlement miss the window and reclaim the hold with claimTimeout.
+   */
+  minRemainingSeconds?: number
 }
 
 /**
@@ -35,11 +43,12 @@ export type FermataServerOptions = {
  * - `stableBinding` binds a credential to this route's serviceId, requestHash, price, token and
  *   escrow, but not to the per-challenge callId;
  * - `validate` accepts only a successful hold transaction on this escrow whose `Held` event has this
- *   callId, serviceId, requestHash and amount, and whose hold is still open;
+ *   callId, serviceId, requestHash and amount, and whose hold is still open with enough of its
+ *   settlement window left to prove and settle (`minRemainingSeconds`);
  * - `broadcast` claims the callId once (replay protection) and returns the receipt.
  * Every rejection is a `VerificationFailedError` (HTTP 402), never a 500.
  */
-export function fermataServer({ client: anyClient, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000 }: FermataServerOptions): Method.Server<typeof fermataMethod> {
+export function fermataServer({ client: anyClient, escrow, secretKey, store = Store.memory(), lagToleranceMs = 6_000, minRemainingSeconds = 15 }: FermataServerOptions): Method.Server<typeof fermataMethod> {
   const client = anyClient as PublicClient
   const tries = Math.max(1, Math.round(lagToleranceMs / 500))
   return Method.toServer(fermataMethod, {
@@ -78,6 +87,12 @@ export function fermataServer({ client: anyClient, escrow, secretKey, store = St
       if (hold.status !== HoldStatus.Held) fail(`hold is no longer open (status ${hold.status})`)
       const { timestamp } = await client.getBlock()
       if (timestamp > hold.deadline) fail(`the hold's settlement window closed at ${hold.deadline}: reclaim it with claimTimeout`)
+      const window = hold.heldAt ? BigInt(hold.deadline) - BigInt(hold.heldAt) : 0n
+      const wanted = BigInt(Math.max(0, Math.floor(minRemainingSeconds)))
+      const margin = window > 0n && window / 3n < wanted ? window / 3n : wanted
+      if (BigInt(hold.deadline) - timestamp < margin) {
+        fail(`only ${BigInt(hold.deadline) - timestamp} s of the hold's settlement window are left (${margin} s needed to prove and settle): reclaim it with claimTimeout after ${hold.deadline}`)
+      }
 
       return {
         challenge: credential.challenge,

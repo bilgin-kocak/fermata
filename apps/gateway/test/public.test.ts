@@ -85,6 +85,20 @@ describe('public demo routes', () => {
     expect(paid).toEqual([`${sid}/v1/quote?symbol=BTC-USD`])
   })
 
+  it('pays onboarded services by serviceId only up to the demo price cap (no draining the demo wallet)', async () => {
+    const cheap = `0x${'c1'.repeat(32)}` as Hex
+    const dear = `0x${'d1'.repeat(32)}` as Hex
+    const prices = new Map<string, bigint>([[cheap, 10_000n], [dear, 1_000_000n]])
+    const s = setup({ examplePath: () => '/v1/x', priceOf: (id) => prices.get(id) })
+    const byId = (ip: string, serviceId: Hex) =>
+      s.app.request('/demo/call', { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': ip }, body: JSON.stringify({ serviceId }) })
+    const refused = await byId('203.0.113.7', dear)
+    expect(refused.status).toBe(400)
+    expect(((await refused.json()) as { error: string }).error).toMatch(/at most 0.01/)
+    expect((await byId('203.0.113.8', cheap)).status).toBe(200)
+    expect(s.paid).toEqual([`${cheap}/v1/x`])
+  })
+
   it('rejects unknown kinds, including inherited object keys', async () => {
     const s = setup()
     expect((await s.call('1.1.1.1', 'nope')).status).toBe(400)

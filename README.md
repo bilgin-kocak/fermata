@@ -383,6 +383,11 @@ const res = await mppx.fetch(paidApiUrl) // released to the vendor on proof, or 
 
 The full example, the server side and the trust model: [`packages/sdk/README.md`](packages/sdk/README.md).
 
+Limits on a paid request: its path, query and body must total at most 2048 bytes of UTF-8 text (larger
+or binary requests cannot be proved in the attestor's MPC budget and get 413/415 before any payment),
+and the credential must arrive with at least 15 s of the hold's settlement window left (both clients
+present it right after the hold).
+
 ## Quickstart
 
 Requires Foundry 1.8.3, Node ≥ 22.21, pnpm 10, `jq`, OpenSSL ≥ 1.1.1 (not LibreSSL; for the dev certificates) and (for the attestor) Rust 1.95.0 via rustup. `pnpm dev` starts the whole stack on a local Tempo emulation.
