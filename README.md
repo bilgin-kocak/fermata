@@ -128,25 +128,37 @@ delivered. The [hosted demo](https://fermata-production-9378.up.railway.app/dash
 
 **Try it.** Each button makes a real paid call: hold on-chain, TLSNotary proof, settle.
 - A server-side demo agent pays, so visitors need no wallet.
-- The vendors are a reliable one, a broken one, a silent one, and the real npm registry (a 200 and a 404).
+- The vendors are a reliable one, a broken one, a silent one, and real public APIs: the npm registry (a 200 and a 404), Coinbase's BTC price, Kraken's BTC ticker and mempool.space's Bitcoin fees.
 - Every call links to its transactions and its re-verifiable proof.
 
 ![Try it: a paid call to the real npm registry, proved and released (local Tempo emulation)](docs/img/public-tryit.png)
 
-**Vendor scores.** Each vendor's proven delivery record comes **from the escrow's own events only**:
-- released;
-- refunded on a proven failure;
-- refunded on timeout;
+**Vendor scores.** Each vendor's proven delivery record comes from the escrow's own events and the
+public proofs they point to:
+- **released**: delivered and paid;
+- **vendor failures**: refunded on the vendor's own proved answer (5xx, broken or wrong-shaped);
+- **client errors**: a proved 4xx, caused by the agent's request (refunded, **not counted**, so no
+  one can sink a rival's score by sending it bad requests);
+- **timeouts**: no proof in the window (shown, not counted: anyone can hold a call and never present it);
 - distinct agents.
 
-Vendors are ranked by the Wilson 95 % lower bound, so 3/3 doesn't outrank 950/1000.
-`pnpm scores --chain moderato` recomputes the table from any RPC; on Anvil it matches the gateway
-exactly. Agents get the same data as a free MCP tool (`fermata_vendor_scores`) and can pick
-reliable vendors before paying. Two limits are stated with the scores:
+Vendors are ranked by the Wilson 95 % lower bound of released ÷ (released + vendor failures), so
+3/3 doesn't outrank 950/1000. Anyone can recompute it:
+`pnpm scores --chain moderato --proofs <gateway URL>` reads the events from any RPC, downloads
+each proven failure's presentation, checks it against the on-chain hash, verifies it offline and
+classifies it by the HTTP status it proves. On Anvil it matches the gateway exactly. Agents get the
+same data as a free MCP tool (`fermata_vendor_scores`) and can pick reliable vendors before paying.
+
+Shown next to the score, not in it: the **no-answer rate**, the share of calls this gateway accepted
+that the vendor never answered, flagged "often no answer" at 20 % or more of at least 5 calls. A
+vendor that hangs leaves no transcript, so this comes from the gateway's own records, not a proof;
+a network failure on the gateway's side looks the same.
+
+Two more limits are stated with the scores:
 - only calls paid through Fermata count;
 - a vendor could pay itself, which is why distinct agents are shown.
 
-![Vendor scores from on-chain events (local Tempo emulation)](docs/img/public-vendors.png)
+![Vendor scores: delivered, vendor failures, client errors and the no-answer rate (local Tempo emulation)](docs/img/public-vendors.png)
 
 **List your API.** A vendor pastes a URL. The gateway:
 1. checks it is a public HTTPS host (never a private or internal address);

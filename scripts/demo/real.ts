@@ -1,12 +1,13 @@
 // pnpm demo:real [--chain anvil|moderato]
 //
 // Fermata against real third-party APIs, not our mock vendor: the running stack registers
-// registry.npmjs.org (and api.coinbase.com with REAL_VENDORS=npm,coinbase). The vendor's TLS session
+// registry.npmjs.org (and, with REAL_VENDORS=npm,coinbase,mempool,kraken[,weather], api.coinbase.com,
+// mempool.space, api.kraken.com and api.open-meteo.com). The vendor's TLS session
 // is proved with TLSNotary and its certificate checked against Mozilla's root program.
 //   1 release  npm answers mppx's dist-tags              → DELIVERED → vendor paid
 //   2 refund   npm's genuine 404 for a missing package   → FAILED    → agent refunded
 //   3 MCP      the same vendor as an MCP tool, paid by fermata-mcp
-//   4 Coinbase spot price (only if the stack registered it)
+//   4 Coinbase spot price, 5 Bitcoin fees, 6 Kraken ticker, 7 weather (each only if registered)
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createWalletClient, http, type Hex } from 'viem'
@@ -14,7 +15,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tip20Abi } from 'fermata-sdk'
 import { chain, client, fundedAgent, gw, link, receiptOf, short, stack, table, TOKEN } from './lib.ts'
 
-const real = (stack as typeof stack & { real?: { npm?: Hex; coinbase?: Hex } }).real ?? {}
+const real = (stack as typeof stack & { real?: { npm?: Hex; coinbase?: Hex; mempool?: Hex; kraken?: Hex; weather?: Hex } }).real ?? {}
 if (!real.npm) throw new Error('the running stack has no real vendor: restart it with REAL_VENDORS=npm (the default)')
 
 type Row = { case: string; pass: boolean; outcome: string; callId: string; tx: string; notes: string[] }
@@ -92,6 +93,9 @@ async function viaMcp(name: string, tool: string, args: Record<string, string>) 
 }
 await viaMcp('3 MCP — npm as a paid tool', 'npm_latest_version', { package: 'viem' })
 if (real.coinbase) await viaMcp('4 MCP — Coinbase spot price', 'get_spot_price', { pair: 'BTC-USD' })
+if (real.mempool) await http402('5 release — mempool.space Bitcoin fees', real.mempool, '/api/v1/fees/recommended', 'DELIVERED')
+if (real.kraken) await viaMcp('6 MCP — Kraken BTC ticker', 'get_btc_ticker_kraken', {})
+if (real.weather) await viaMcp('7 MCP — Open-Meteo current temperature', 'get_current_temperature', { latitude: '39.78', longitude: '30.52' })
 await mcp.close()
 
 console.log(table(['case', 'result', 'outcome', 'callId', 'settle / refund tx'], rows.map((r) => [r.case, r.pass ? 'PASS' : 'FAIL', r.outcome, r.callId.length > 2 ? short(r.callId) : '-', r.tx])))

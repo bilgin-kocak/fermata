@@ -606,3 +606,28 @@ Fixes listed in `SECURITY.md` ("Hardening"). Checked against a local stack
 | Paid route with a 3,000-byte query / a non-UTF-8 body / a 100 KB body | 413 / 415 / 413, no challenge |
 | 125 unpaid requests from one address in a minute (limit 120) | 402 until the limit, then 429 with `Retry-After` |
 | `GET /calls?limit=2` | the 2 newest of 8 calls |
+
+### 15.11 Fair vendor scores and more real APIs (2026-11-17, Anvil, public mode)
+
+Real APIs probed from this environment with `scripts/probe-tls.sh` (TLS 1.2, AES-128-GCM on P-256,
+Mozilla roots), each response inspected before its predicate was written:
+
+| API | Path | Answer | Bad input | In the demo |
+|---|---|---|---|---|
+| api.coinbase.com | `/v2/prices/{pair}/spot` | 200, 61 B JSON, Google Trust Services | 404 (a client error) | yes, `get_spot_price` |
+| mempool.space | `/api/v1/fees/recommended` | 200, 74 B JSON, Sectigo; 0.1–0.15 s | no input | yes, `get_bitcoin_fees` |
+| api.kraken.com | `/0/public/Ticker?pair=XBTUSD` | 200, 310 B JSON; 6/6 in < 0.1 s | **200** with `{"error":[…]}` | yes, fixed pair (no agent input) |
+| api.open-meteo.com | `/v1/forecast?…&current=temperature_2m` | 200, chunked JSON, Let's Encrypt | 400 | opt-in only: 1 of 6 requests stalled 12 s, then 429 for this egress IP |
+
+`PUBLIC=1 REAL_VENDORS=npm,coinbase,mempool,kraken bash scripts/demo-stack.sh up --chain anvil`:
+
+| Check | Result |
+|---|---|
+| `pnpm sdk:test` / `pnpm gateway:test` | 57 / 117 pass |
+| `pnpm demo:cases` / `pnpm demo:mcp` | 3/3, 6/6 |
+| `pnpm demo:real` | 6/6: npm 200 and 404, npm over MCP, Coinbase, mempool.space, Kraken (Open-Meteo, chunked, also passed once in an earlier run) |
+| `deploy/smoke.sh` | 10/10 (reliable, broken, npm, coinbase, btc-fees, kraken; each proof re-verified) |
+| Ten paid calls to npm for missing packages (proven 404s) | npm's score unchanged (34.2 % before and after); 11 client errors, 0 vendor failures |
+| Five calls to the silent vendor | no answer 5/5, flagged "often no answer"; the score is unchanged |
+| `pnpm scores --chain anvil --verifier … --proofs http://127.0.0.1:4300 --json` | 6 proven failures verified offline and classified (npm 404s: client; mock 500s: vendor), 0 unverified; equal to `GET /scores` for all 9 services |
+| One mempool.space call through this environment's egress proxy | no transcript ("prove attempt 1") 3 s in; the calls before and after it were proved: a dropped tunnel, refunded by timeout and counted as no-answer |

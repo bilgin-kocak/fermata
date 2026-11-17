@@ -64,10 +64,18 @@ class FakeChain implements GatewayChain {
   }
   scoringLogs: import('fermata-sdk').EscrowLog[] = []
   async escrowLogs(fromBlock: bigint) {
+    const presentation = (callId: Hex) => keccak256(toHex(`presentation-${callId}`))
+    const heldLogs = [...this.receipts.values()].map((r) => ({
+      eventName: 'Held', blockNumber: 1n, transactionHash: keccak256(toHex(`hold-${r.callId}`)), args: { callId: r.callId, serviceId: r.serviceId, agent, amount: r.amount },
+    }))
     const settledLogs = this.settled.map((x) => ({
-      eventName: x.outcome === 1 ? 'Released' : 'Refunded', blockNumber: 2n, transactionHash: keccak256(toHex(`settle-${x.callId}`)), args: { callId: x.callId, serviceId: sid },
-    })) as import('fermata-sdk').EscrowLog[]
-    return { logs: [...this.scoringLogs, ...settledLogs].filter((l) => l.blockNumber >= fromBlock), toBlock: 100n }
+      eventName: x.outcome === 1 ? 'Released' : 'Refunded', blockNumber: 2n, transactionHash: keccak256(toHex(`settle-${x.callId}`)), args: { callId: x.callId, serviceId: sid, amount: 10_000n, fee: 50n, presentationHash: presentation(x.callId) },
+    }))
+    const timeoutLogs = this.timeouts.map((callId) => ({
+      eventName: 'Refunded', blockNumber: 3n, transactionHash: keccak256(toHex(`timeout-${callId}`)), args: { callId, serviceId: sid, amount: 10_000n, presentationHash: `0x${'00'.repeat(32)}` },
+    }))
+    const logs = [...this.scoringLogs, ...heldLogs, ...settledLogs, ...timeoutLogs] as import('fermata-sdk').EscrowLog[]
+    return { logs: logs.filter((l) => l.blockNumber >= fromBlock), toBlock: 100n }
   }
   /** A stranger's transfer that reuses the call's memo (anyone can send one). */
   memoSpoof = false
@@ -113,8 +121,10 @@ class FakeAttestor implements Attestor {
   async health() {
     return { signer, escrow, chainId: 42431 }
   }
+  /** The raw proven response `reverify` returns (offline re-verification of the stored proof). */
+  provenResponse = 'HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{}'
   async reverify(input: { callId: Hex }) {
-    return { presentationHash: keccak256(toHex(`presentation-${input.callId}`)), requestHash: null, originHash: originHash(upstream), notaryKeyHash: `0x${'55'.repeat(32)}`, predicateHash: `0x${'44'.repeat(32)}`, outcome: 'DELIVERED', callHeaderMatches: true } as never
+    return { presentationHash: keccak256(toHex(`presentation-${input.callId}`)), requestHash: null, originHash: originHash(upstream), notaryKeyHash: `0x${'55'.repeat(32)}`, predicateHash: `0x${'44'.repeat(32)}`, outcome: 'DELIVERED', callHeaderMatches: true, response: this.provenResponse } as never
   }
   async presentation(callId: Hex) {
     return callId.startsWith('0x') ? new Uint8Array([1, 2, 3]) : undefined
@@ -383,7 +393,7 @@ describe('gateway', () => {
     expect(rec.match).toBe(true)
     expect(rec.movements).toHaveLength(3)
     const events = (await (await gw.app.request(`${BASE}/events?since=0`)).json()) as { event: string; callId: string }[]
-    expect(events).toEqual([expect.objectContaining({ event: 'Released', callId })])
+    expect(events).toEqual([expect.objectContaining({ event: 'Held', callId }), expect.objectContaining({ event: 'Released', callId })])
     expect(await (await gw.app.request(`${BASE}/info`)).json()).toMatchObject({ chainId: 42431, escrow })
   })
 
@@ -521,6 +531,44 @@ describe('vendor scores', () => {
     expect(mine).toMatchObject({ known: true, label: 'quote', upstream, released: 1, timeouts: 1, settled: 2, deliveryRate: 1, fewCalls: true, distinctAgents: 1 })
     expect(body.scores.find((s) => s.serviceId === other)).toMatchObject({ known: false, label: 'stranger', open: 1, deliveryRate: null })
     expect(body.scores.find((s) => s.serviceId === selfVerified)).toBeUndefined()
+  })
+
+  it('a proven 4xx is a client error (reported, not ranked); a 5xx is a vendor failure; a hang is no-answer', async () => {
+    chain.scoringLogs = [{ eventName: 'ServiceRegistered', blockNumber: 0n, transactionHash: sid, args: { serviceId: sid, owner: vendor, token, payout: vendor, verifier: signer, pricePerCall: 10_000n, settlementWindow: 120 } }]
+    const pay = agentFetch()
+    const q = (sym: string) => pay(`/s/${sid}/v1/quote?symbol=${sym}`)
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    await q('OK')
+    attestor.next = (i) => verdict(i.callId, 2, { status: 404, body: '{"error":"unknown symbol"}' })
+    for (let i = 0; i < 3; i++) await q(`NOPE${i}`) // a griefer's bad requests
+    attestor.next = (i) => verdict(i.callId, 2, { status: 500, body: '{}' })
+    await q('BOOM')
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'vendor never answered' })
+    await q('HANG1')
+    await q('HANG2')
+    attestor.next = () => ({ kind: 'no-transcript', detail: 'attestor HTTP 500', retryable: true })
+    await q('ATTESTOR') // the attestor's failure, not the vendor's
+    chain.time = 1_121n
+    await gw.sweep()
+    const body = (await (await gw.app.request(`${BASE}/scores`)).json()) as { scores: Record<string, unknown>[]; caveats: string[] }
+    expect(body.caveats.join(' ')).toContain('4xx')
+    expect(body.scores.find((s) => s.serviceId === sid)).toMatchObject({
+      released: 1, provenFailures: 4, clientErrors: 3, vendorFailures: 1, unclassified: 0, timeouts: 3,
+      deliveryRate: 0.5, accepted: 8, noAnswer: 2, noAnswerRate: 0.25, oftenNoAnswer: true,
+    })
+    const res = (await (await mcpClient(false)).callTool({ name: 'fermata_vendor_scores', arguments: {} })) as unknown as ToolResult
+    expect(res.content[0]!.text).toContain('3 client errors (4xx, not counted)')
+    expect(res.content[0]!.text).toContain('no answer 2/8 (often no answer)')
+  })
+
+  it('backfills the proven status of refunds recorded before it was kept, from the stored proof', async () => {
+    const callId = keccak256(toHex('old-refund')) as Hex
+    const now = new Date().toISOString()
+    await store.put({ callId, serviceId: sid, method: 'GET', target: '/v1/quote?symbol=X', requestHash: `0x${'33'.repeat(32)}`, holdTx: keccak256(toHex('h')), deadline: '1120', status: 'refunded', outcome: 'FAILED', presentationHash: keccak256(toHex(`presentation-${callId}`)), createdAt: now, updatedAt: now })
+    attestor.provenResponse = 'HTTP/1.1 404 Not Found\r\ncontent-type: application/json\r\n\r\n{}'
+    expect(await gw.backfillStatuses()).toBe(1)
+    expect((await store.get(callId))?.vendorStatus).toBe(404)
+    expect(await gw.backfillStatuses()).toBe(0) // once
   })
 
   it('MCP fermata_vendor_scores summarises the same numbers for an agent', async () => {

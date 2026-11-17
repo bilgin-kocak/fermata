@@ -52,6 +52,12 @@ export type VendorScore = {
   held: number
   released: number
   provenFailures: number
+  /** Proven failures that are the vendor's (5xx, broken or wrong-shaped answer): ranked. */
+  vendorFailures: number
+  /** Proven failures with no known class: ranked, as vendor failures. */
+  unclassified: number
+  /** Proven 4xx: the agent's request; shown, not ranked. */
+  clientErrors: number
   timeouts: number
   open: number
   settled: number
@@ -59,6 +65,11 @@ export type VendorScore = {
   score: number
   distinctAgents: number
   fewCalls: boolean
+  /** Calls this gateway accepted, and those the vendor never answered (gateway-reported, unprovable). */
+  accepted: number
+  noAnswer: number
+  noAnswerRate: number | null
+  oftenNoAnswer: boolean
 }
 export type Scores = { escrow: string; chainId: number; scannedTo: string; method: string; recompute: string; caveats: string[]; scores: VendorScore[] }
 

@@ -9,6 +9,12 @@
 // 950/1000. A ranking should only include services whose verifier it trusts (ServiceRegistered
 // carries it): a service that names itself as verifier can sign "deliveries" with no proof.
 //
+// A proven failure can be the agent's own doing: bad input answered with a 4xx is a correct answer
+// that failed the delivery rule, and the agent is refunded. Anyone could send such calls to sink a
+// rival's score, so a caller that knows each failure's proven HTTP status (from the public proof, or
+// a gateway's records of it) passes `classify`: client errors (4xx) are reported, not ranked. A
+// failure with no known class still counts against the vendor.
+//
 // Limits (shown wherever scores are shown): only calls paid through Fermata count, and a vendor can
 // pay itself to inflate its score; distinct agents are reported for that reason.
 import { type Address, type Hex, type PublicClient } from 'viem'
@@ -37,15 +43,22 @@ export type ServiceScore = {
   released: number
   /** Refunded with a presentation: the vendor's own answer failed the delivery check. */
   provenFailures: number
+  /** Proven failures whose proven HTTP status was 4xx (the agent's request): reported, not ranked. */
+  clientErrors: number
+  /** Proven failures that are the vendor's (5xx, broken or wrong-shaped answer): ranked. */
+  vendorFailures: number
+  /** Proven failures with no known class: ranked, as vendor failures. */
+  unclassified: number
   /** Refunded by claimTimeout: no proof inside the settlement window. */
   timeouts: number
   /** Held, not yet settled. */
   open: number
   settled: number
   /**
-   * released / (released + provenFailures): the share of PROVEN outcomes that were deliveries, or null
-   * before the first one. Timeouts are shown but not counted: anyone can hold a call directly and
-   * never present it, so a timeout says nothing provable about the vendor.
+   * released / (released + vendorFailures + unclassified): the share of PROVEN outcomes that were
+   * deliveries, or null before the first one. Timeouts are shown but not counted: anyone can hold a
+   * call directly and never present it, so a timeout says nothing provable about the vendor. Client
+   * errors are not counted either (see `classify`).
    */
   deliveryRate: number | null
   /** Wilson 95 % lower bound of the delivery rate (0 with no proven outcome): the ranking key. */
@@ -67,15 +80,34 @@ export function wilsonLower(successes: number, n: number, z = 1.96): number {
   return Math.max(0, (centre - margin) / (1 + z2 / n))
 }
 
-/** Aggregates escrow logs (any order) into one score per service, best first. */
-export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
+/** The class of a proven failure: `client` (proven 4xx), `vendor`, or undefined when unknown. */
+export type FailureClass = 'client' | 'vendor'
+
+/** The status code of a proven HTTP response (its first line), or null when it is not HTTP. */
+export function provenStatus(response: string): number | null {
+  const m = /^HTTP\/1\.[01] (\d{3})/.exec(response)
+  return m ? Number(m[1]) : null
+}
+
+/** The class of a proven HTTP status: 4xx is the client's, anything else the vendor's. */
+export function failureClass(status: number | null | undefined): FailureClass | undefined {
+  if (status == null || !Number.isFinite(status)) return undefined
+  return status >= 400 && status < 500 ? 'client' : 'vendor'
+}
+
+/**
+ * Aggregates escrow logs (any order) into one score per service, best first. `classify` names the
+ * class of a proven failure by callId (from its public proof); without it every proven failure is
+ * ranked, as before.
+ */
+export function aggregateScores(logs: readonly EscrowLog[], classify?: (callId: Hex) => FailureClass | undefined): ServiceScore[] {
   const sorted = [...logs].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0))
-  const by = new Map<string, ServiceScore & { agents: Set<string>; settledCalls: Set<string> }>()
+  const by = new Map<string, ServiceScore & { agents: Set<string>; settledCalls: Set<string>; heldCalls: Set<string> }>()
   const get = (serviceId: Hex) => {
     const key = serviceId.toLowerCase()
     let s = by.get(key)
     if (!s) {
-      s = { serviceId, held: 0, released: 0, provenFailures: 0, timeouts: 0, open: 0, settled: 0, deliveryRate: null, score: 0, distinctAgents: 0, releasedAmount: 0n, refundedAmount: 0n, agents: new Set(), settledCalls: new Set() }
+      s = { serviceId, held: 0, released: 0, provenFailures: 0, clientErrors: 0, vendorFailures: 0, unclassified: 0, timeouts: 0, open: 0, settled: 0, deliveryRate: null, score: 0, distinctAgents: 0, releasedAmount: 0n, refundedAmount: 0n, agents: new Set(), settledCalls: new Set(), heldCalls: new Set() }
       by.set(key, s)
     }
     return s
@@ -87,6 +119,8 @@ export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
         Object.assign(s, { owner: log.args.owner, payout: log.args.payout, verifier: log.args.verifier, pricePerCall: log.args.pricePerCall, registeredBlock: log.blockNumber })
         break
       case 'Held':
+        if (s.heldCalls.has(log.args.callId.toLowerCase())) break // overlapping scans
+        s.heldCalls.add(log.args.callId.toLowerCase())
         s.held++
         s.agents.add(log.args.agent.toLowerCase())
         s.firstCallBlock ??= log.blockNumber
@@ -102,7 +136,13 @@ export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
           s.releasedAmount += log.args.amount
         } else {
           if (log.args.presentationHash.toLowerCase() === ZERO32) s.timeouts++
-          else s.provenFailures++
+          else {
+            s.provenFailures++
+            const cls = classify?.(log.args.callId)
+            if (cls === 'client') s.clientErrors++
+            else if (cls === 'vendor') s.vendorFailures++
+            else s.unclassified++
+          }
           s.refundedAmount += log.args.amount
         }
         break
@@ -110,10 +150,10 @@ export function aggregateScores(logs: readonly EscrowLog[]): ServiceScore[] {
     }
   }
   const out: ServiceScore[] = []
-  for (const { agents, settledCalls, ...s } of by.values()) {
+  for (const { agents, settledCalls, heldCalls, ...s } of by.values()) {
     s.settled = s.released + s.provenFailures + s.timeouts
     s.open = Math.max(0, s.held - s.settled)
-    const proven = s.released + s.provenFailures
+    const proven = s.released + s.vendorFailures + s.unclassified
     s.deliveryRate = proven ? s.released / proven : null
     s.score = wilsonLower(s.released, proven)
     s.distinctAgents = agents.size

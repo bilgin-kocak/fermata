@@ -7,7 +7,7 @@ import { Credential, Receipt } from 'mppx'
 import { discovery } from 'mppx/hono'
 import { Mppx, tempo } from 'mppx/server'
 import { isAddressEqual, parseEventLogs, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
-import { aggregateScores, eventually, fermataEscrowAbi, fermataServer, MODERATO, originHash, predicateHash, requestHash, serviceLabelOf, type EscrowLog } from 'fermata-sdk'
+import { aggregateScores, eventually, failureClass, provenStatus, fermataEscrowAbi, fermataServer, MODERATO, originHash, predicateHash, requestHash, serviceLabelOf, type EscrowLog } from 'fermata-sdk'
 import type { AttestResult, Attestor, ProvedResponse } from './attestor.ts'
 import { toVerdict, type GatewayChain } from './chain.ts'
 import type { GatewayConfig, ServiceConfig } from './config.ts'
@@ -67,7 +67,13 @@ export function provedToResponse(p: ProvedResponse): Response {
   return new Response(body, { status: p.status, headers })
 }
 
-/** Checks every configured service against the chain and the attestor; refuses to start on mismatch. */
+/** A call this gateway accepted that never got an answer from the vendor (not the attestor's failure). */
+export function isNoAnswer(r: CallRecord): boolean {
+  if (r.noAnswer !== undefined) return r.noAnswer
+  // Records from before `noAnswer` existed: a vendor-side no-transcript, never marked recoverable.
+  return (r.status === 'awaiting-timeout' || r.status === 'timed-out') && !!r.error?.startsWith('no-transcript') && r.recoverable === undefined
+}
+
 /** A configured service checked against the chain: registered, settled by this attestor, same origin. */
 async function checkService(deps: GatewayDeps, signer: Address, cfg: ServiceConfig): Promise<Service> {
   const s = await deps.chain.service(cfg.serviceId)
@@ -223,7 +229,8 @@ export async function createGateway(deps: GatewayDeps) {
       const detail = result.kind === 'rejected' ? `${result.check}: ${result.detail}` : result.detail
       console.error(`[gateway] call ${callId} has NO VERDICT (${result.kind}: ${detail}); awaiting timeout at ${hold?.deadline ?? '?'}`)
       const recoverable = result.kind === 'no-transcript' && !!result.retryable
-      record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}`, ...(recoverable ? { recoverable, recoverTries: 0 } : {}) })
+      const noAnswer = result.kind === 'no-transcript' && !result.retryable
+      record = await store.update(callId, { status: 'awaiting-timeout', error: `${result.kind}: ${detail}`, noAnswer, ...(recoverable ? { recoverable, recoverTries: 0 } : {}) })
       const response = Response.json(
         { error: result.kind, detail, callId, status: 'awaiting-timeout', refundAfter: hold?.deadline.toString() ?? null, reclaim: 'claimTimeout(callId) on the escrow after refundAfter' },
         { status: result.kind === 'rejected' ? 502 : 504 },
@@ -251,8 +258,10 @@ export async function createGateway(deps: GatewayDeps) {
       proveMs: result.proveMs,
       notaryBytes: result.notaryBytes,
       signer: result.signed.signer,
+      vendorStatus: result.response.status,
       error: undefined,
       recoverable: undefined,
+      noAnswer: undefined,
     })
   }
 
@@ -396,9 +405,22 @@ export async function createGateway(deps: GatewayDeps) {
   const { signer: attestorSigner } = await attestor.health()
   app.get('/scores', async (c) => {
     await refreshLogs()
-    const all = aggregateScores(logCache.logs)
+    // This gateway's records: the proven HTTP status of each failure (to tell the agent's 4xx from the
+    // vendor's failures) and the calls it accepted that never got an answer.
+    const records = await store.list()
+    const statusOf = new Map(records.filter((r) => r.vendorStatus !== undefined).map((r) => [r.callId.toLowerCase(), r.vendorStatus]))
+    const accepted = new Map<string, { accepted: number; noAnswer: number }>()
+    for (const r of records) {
+      const a = accepted.get(r.serviceId.toLowerCase()) ?? { accepted: 0, noAnswer: 0 }
+      a.accepted++
+      if (isNoAnswer(r)) a.noAnswer++
+      accepted.set(r.serviceId.toLowerCase(), a)
+    }
+    const all = aggregateScores(logCache.logs, (callId) => failureClass(statusOf.get(callId.toLowerCase())))
     const scores = all.filter((s) => s.verifier && isAddressEqual(s.verifier, attestorSigner)).map((s) => {
       const svc = services.get(s.serviceId.toLowerCase())
+      const a = accepted.get(s.serviceId.toLowerCase()) ?? { accepted: 0, noAnswer: 0 }
+      const noAnswerRate = a.accepted ? a.noAnswer / a.accepted : null
       return {
         ...s,
         label: serviceLabelOf(s.serviceId) ?? null,
@@ -407,21 +429,52 @@ export async function createGateway(deps: GatewayDeps) {
         summary: svc?.summary ?? null,
         tool: svc ? toolFor(svc).name : null,
         fewCalls: s.settled < 20,
+        accepted: a.accepted,
+        noAnswer: a.noAnswer,
+        noAnswerRate,
+        oftenNoAnswer: a.accepted >= 5 && (noAnswerRate ?? 0) >= 0.2,
       }
     })
     return c.json(plain({
       escrow: chain.escrow, chainId: chain.chainId, scannedTo: logCache.next - 1n, verifier: attestorSigner,
-      method: 'Wilson 95 % lower bound of released / (released + proven failures), from ServiceRegistered/Held/Released/Refunded events only; timeouts are shown but not ranked',
-      recompute: `pnpm scores --chain <anvil|moderato> --escrow ${chain.escrow} --verifier ${attestorSigner}`,
+      method: 'Wilson 95 % lower bound of released / (released + proven vendor failures), from ServiceRegistered/Held/Released/Refunded events; each proven failure is classified by the HTTP status its public proof shows (4xx: the client\'s, not ranked); timeouts are shown but not ranked',
+      recompute: `pnpm scores --chain <anvil|moderato> --escrow ${chain.escrow} --verifier ${attestorSigner} --proofs <this gateway's URL>`,
       caveats: [
         'Only calls paid through Fermata count.',
         `Only services settled by this attestor (${attestorSigner}) are ranked; ${all.length - scores.length} other service(s) on this escrow are not.`,
+        'Proven 4xx failures are shown, not ranked: an agent can cause them with bad input.',
         'Timeouts are shown but not ranked: anyone can hold a call and never present it.',
+        'No-answer counts are this gateway\'s own records of calls it accepted: a vendor that never answers leaves no transcript to prove.',
         'A vendor could pay itself to inflate its score; distinct agents are shown for that reason.',
       ],
       scores,
     }))
   })
+
+  /**
+   * Proven statuses for refunds recorded before the gateway kept them: read once, in the background,
+   * from the stored proofs (offline re-verification), so old 4xx refunds stop counting against vendors.
+   */
+  async function backfillStatuses(limit = 500): Promise<number> {
+    const missing = (await store.list()).filter((r) => r.status === 'refunded' && r.presentationHash && r.vendorStatus === undefined).slice(-limit)
+    const predicates = new Map<string, Hex>()
+    let done = 0
+    for (const r of missing) {
+      try {
+        const key = r.serviceId.toLowerCase()
+        if (!predicates.has(key)) predicates.set(key, (await chain.service(r.serviceId)).predicateHash)
+        const re = await attestor.reverify({ callId: r.callId, serviceId: r.serviceId, predicateHash: predicates.get(key)! })
+        if ('error' in re) continue
+        if (String(re.presentationHash).toLowerCase() !== r.presentationHash!.toLowerCase()) continue
+        await store.update(r.callId, { vendorStatus: provenStatus(String(re.response ?? '')) })
+        done++
+      } catch {
+        // best effort: an unreadable proof stays unclassified (ranked as a vendor failure)
+      }
+    }
+    if (done) log(`backfilled the proven status of ${done} refunded call(s)`)
+    return done
+  }
 
   // Newest `limit` calls (default 500), oldest first as before.
   app.get('/calls', async (c) => {
@@ -672,5 +725,5 @@ export async function createGateway(deps: GatewayDeps) {
     return done
   }
 
-  return { app, services, sweep, mppx, addService, warmLogs: refreshLogs }
+  return { app, services, sweep, mppx, addService, warmLogs: refreshLogs, backfillStatuses }
 }

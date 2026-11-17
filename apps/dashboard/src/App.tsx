@@ -829,7 +829,7 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
   return (
     <div className="panel">
       <h2>
-        Vendor scores <span className="muted">proven delivery, from on-chain events</span>
+        Vendor scores <span className="muted">proven delivery, from on-chain events and public proofs</span>
       </h2>
       {rows.length === 0 ? (
         <div className="empty">No calls yet.</div>
@@ -841,8 +841,9 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
               <th>Vendor</th>
               <th>Delivered</th>
               <th>Score</th>
-              <th className="hide-sm">Proven failures</th>
-              <th className="hide-sm">Timeouts</th>
+              <th className="hide-sm">Vendor failures</th>
+              <th className="hide-sm">Client errors</th>
+              <th className="hide-sm">No answer</th>
               <th className="hide-sm">Agents</th>
             </tr>
           </thead>
@@ -855,19 +856,28 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
                     {s.tool ?? s.label ?? short(s.serviceId, 8)}
                     {s.fewCalls ? <span className="badge" style={{ marginLeft: 8 }}>few calls</span> : null}
                   </div>
+                  {s.oftenNoAnswer ? (
+                    <span className="chip warning" title={`${s.noAnswer} of ${s.accepted} accepted calls got no answer (this gateway's records; no proof possible)`}>
+                      <span className="mark" aria-hidden>!</span>
+                      often no answer
+                    </span>
+                  ) : null}
                   <div className="mono muted origin" title={s.serviceId}>
                     {s.upstream ?? short(s.serviceId, 8)}
                   </div>
                 </td>
                 <td className="num">
-                  {s.released}/{s.settled} <span className="muted hide-sm">({pct(s.deliveryRate)})</span>
+                  {s.released}/{s.released + s.vendorFailures + s.unclassified} <span className="muted hide-sm">({pct(s.deliveryRate)})</span>
                   {s.open ? <div className="muted">{s.open} open</div> : null}
                 </td>
                 <td className="num">
                   <b>{pct(s.score)}</b>
                 </td>
-                <td className="hide-sm num">{s.provenFailures}</td>
-                <td className="hide-sm num">{s.timeouts}</td>
+                <td className="hide-sm num">{s.vendorFailures + s.unclassified}</td>
+                <td className="hide-sm num">{s.clientErrors}</td>
+                <td className="hide-sm num">
+                  {s.noAnswer}/{s.accepted}
+                </td>
                 <td className="hide-sm num">{s.distinctAgents}</td>
               </tr>
             ))}
@@ -875,8 +885,10 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
         </table>
       )}
       <footer className="foot" style={{ padding: '0 14px 12px' }}>
-        Score = Wilson 95 % lower bound of delivered ÷ settled, so 3/3 does not outrank 950/1000. Proven failure = refunded on the
-        vendor's own proved answer; timeout = no proof in the window. {scores.caveats.join(' ')} Recompute it from the chain:{' '}
+        Score = Wilson 95 % lower bound of delivered ÷ (delivered + vendor failures), so 3/3 does not outrank 950/1000. Vendor failure =
+        refunded on the vendor's own proved answer (5xx, broken or wrong-shaped). Client error = a proved 4xx, caused by the agent's
+        request: refunded, not counted. No answer = calls this gateway accepted that the vendor never answered (its own records; nothing
+        to prove). {scores.caveats.join(' ')} Recompute it from the chain and the public proofs:{' '}
         <span className="mono">{scores.recompute.replace('<escrow>', scores.escrow)}</span>
         {info?.explorer ? (
           <>

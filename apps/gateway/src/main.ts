@@ -148,6 +148,8 @@ const gateway = await createGateway({
 self = gateway.app
 // Read the escrow's history now, not on the first dashboard visit.
 gateway.warmLogs().catch((e) => console.error(`[gateway] event cache: ${(e as Error).message}`))
+// Proven statuses of refunds recorded before the gateway kept them (classifies 4xx vs vendor failures).
+gateway.backfillStatuses().catch((e) => console.error(`[gateway] status backfill: ${(e as Error).message}`))
 
 setInterval(() => {
   gateway.sweep().catch((e) => console.error(`[gateway] sweep failed: ${(e as Error).message}`))

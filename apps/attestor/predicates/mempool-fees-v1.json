@@ -1,0 +1,1 @@
+{"version":1,"status":[200],"maxBodyBytes":1024,"contentType":"application/json","jsonSchema":{"type":"object","required":["fastestFee","halfHourFee","hourFee"],"properties":{"fastestFee":{"type":"number"},"halfHourFee":{"type":"number"},"hourFee":{"type":"number"}}}}

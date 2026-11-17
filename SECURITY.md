@@ -39,14 +39,21 @@ SDK (regression tests in `apps/gateway/test` and `packages/sdk/test`):
 - **Public-demo abuse.** The demo agent pays onboarded services only up to 0.01 (anyone can list one
   at up to 1.00 with their own payout); body-size limits; per-visitor rate limits on paid routes and
   proof re-verification.
+- **Score gaming with bad requests.** A proven 4xx (the agent's own bad input) is a client error:
+  refunded, shown, never counted against the vendor. Each failure is classified by the HTTP status
+  its public proof shows (`pnpm scores --proofs` recomputes it). A vendor that hangs instead of
+  failing is shown with a no-answer rate (the gateway's own records; a hang leaves nothing to prove).
 
 Known and not yet fixed:
 
 - **Front-running a call ID.** `hold` keys records by `callId` alone: someone who sees an agent's
   pending hold can hold the same `callId` first (against a service of their own), and the agent's
   transaction reverts. The agent loses gas, not funds. Fixing it changes the contract interface.
-- **Score gaming.** A proven 4xx caused by the agent's own input counts as a vendor failure, and a
-  vendor that hangs instead of answering 5xx is counted as a timeout, which the score leaves out.
+- **Score limits.** The no-answer rate rests on the gateway's records, not on proofs, and counts the
+  gateway's own network failures as no-answer. An API that reports bad input as HTTP 200 with an error
+  body (Kraken does) turns an agent's bad input into a vendor failure: such services should take no
+  agent input (the demo's Kraken tool uses a fixed pair). A vendor can still pay itself to inflate its
+  score; distinct agents are shown for that reason.
 - **Unrecoverable refunds.** A refund to an agent that a TIP-20 issuer has blacklisted reverts.
 
 ## Keys

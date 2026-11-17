@@ -135,4 +135,7 @@ MIT licensed.
 
 - **0.1.2:** `fermataServer({ minRemainingSeconds })`: a credential is refused (402) when less than
   this much of the hold's settlement window is left (default 15 s, capped at a third of the window).
+  `aggregateScores(logs, classify)`: proven failures split into `vendorFailures`, `clientErrors`
+  (proven 4xx, not ranked) and `unclassified`; `failureClass` and `provenStatus` helpers; a `Held`
+  event seen twice (overlapping scans) counts once.
 - **0.1.1:** first public release.
