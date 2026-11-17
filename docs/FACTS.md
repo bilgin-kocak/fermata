@@ -631,3 +631,25 @@ Mozilla roots), each response inspected before its predicate was written:
 | Five calls to the silent vendor | no answer 5/5, flagged "often no answer"; the score is unchanged |
 | `pnpm scores --chain anvil --verifier … --proofs http://127.0.0.1:4300 --json` | 6 proven failures verified offline and classified (npm 404s: client; mock 500s: vendor), 0 unverified; equal to `GET /scores` for all 9 services |
 | One mempool.space call through this environment's egress proxy | no transcript ("prove attempt 1") 3 s in; the calls before and after it were proved: a dropped tunnel, refunded by timeout and counted as no-answer |
+
+### 15.12 A notary run elsewhere (2026-11-17, Anvil, public mode)
+
+The stand-in "remote" notary was a second `fermata-attest notary` started from `deploy/notary/entrypoint.sh`:
+- its own key, an access token, and port 7357;
+- on the same machine, so these numbers include no network distance.
+
+Started with `PUBLIC=1 REAL_VENDORS=npm,coinbase,mempool,kraken REMOTE_NOTARY_ADDR=127.0.0.1:7357 REMOTE_NOTARY_PUBLIC_KEY=… REMOTE_NOTARY_TOKEN=… REMOTE_NOTARY_LABEL=… bash scripts/demo-stack.sh up --chain anvil`.
+
+| Check | Result |
+|---|---|
+| Migration | 9 services bound to the local notary, marked legacy and labelled "Fermata-run"; 9 new services (label suffix `2`) bound to the stand-in's key, with the tool names and Try-it buttons |
+| Two rounds back to back | `demo:cases` 3/3, `demo:real` 6/6, `demo:mcp` 7/7, `deploy/smoke.sh` 10/10, each round |
+| Two `fermata-mcp` sessions on one wallet, 5 calls each at once | 10/10 released, no nonce failure |
+| `pnpm reverify` on a new service's call | VERIFIED; the presentation's notary key hash equals the stand-in's (`0xf941bbba…`), as registered on-chain |
+| A connection with a wrong access token | closed before any MPC work: `notary connection … refused: wrong access token` |
+| The stand-in stopped, then a paid call | 503 from the attestor: `connecting to notary 127.0.0.1:7357: Connection refused (os error 111)`; recorded `noAnswer: false`, so not blamed on the vendor; refunded by timeout |
+| Proofs over the whole run | 44 proved; 2 timeouts, both the silent mock vendor by design; earlier runs on this 4-vCPU box with both notaries showed MPC setup stalls in 4 of 36 attempts, which now get one extra attempt |
+
+Not measured here:
+- **Proving across a real network.** The stand-in ran on the same machine, so prove times (about 1.1–1.7 s) are the localhost baseline. Numbers with the notary on another host go here after Bilgin's deploy.
+- **The kit's Docker image.** This environment has no Docker daemon. The image's Rust stage is the same as the main Dockerfile's; its entrypoint is what ran the stand-in above.
