@@ -39,6 +39,15 @@ SDK (regression tests in `apps/gateway/test` and `packages/sdk/test`):
 - **Public-demo abuse.** The demo agent pays onboarded services only up to 0.01 (anyone can list one
   at up to 1.00 with their own payout); body-size limits; per-visitor rate limits on paid routes and
   proof re-verification.
+- **An open notary port.** The notary served MPC sessions to anyone who could reach it. It now
+  refuses a connection that does not open with its access token, before any MPC work. Each service
+  can name its own notary, so the notary can run on another operator's machine (`deploy/notary/`).
+  A notary outage or a TLSNotary setup stall is reported as the gateway side's failure (503), never as
+  the vendor not answering, and a setup stall gets one more attempt, since the vendor was not
+  contacted.
+- **Rate limits shared by everyone using MCP.** In-process requests (the MCP endpoint's
+  `fermata_verify`, the demo agent) had no client address, so every MCP user shared one bucket of
+  proof re-verifications. They are now limited where they enter (`/mcp`, `/demo/call`).
 - **Score gaming with bad requests.** A proven 4xx (the agent's own bad input) is a client error:
   refunded, shown, never counted against the vendor. Each failure is classified by the HTTP status
   its public proof shows (`pnpm scores --proofs` recomputes it). A vendor that hangs instead of
@@ -54,6 +63,10 @@ Known and not yet fixed:
   body (Kraken does) turns an agent's bad input into a vendor failure: such services should take no
   agent input (the demo's Kraken tool uses a fixed pair). A vendor can still pay itself to inflate its
   score; distinct agents are shown for that reason.
+- **Who runs the notary is a claim.** The scoreboard's "notary: …" name comes from the gateway's
+  configuration. What anyone can check is the notary key hash registered on-chain for each service,
+  and that every proof is signed by that key. While Fermata runs the notary, Fermata alone could
+  produce a proof of bytes a server never sent.
 - **Unrecoverable refunds.** A refund to an agent that a TIP-20 issuer has blacklisted reverts.
 
 ## Keys

@@ -51,7 +51,7 @@ export type GatewayDeps = {
 /** JSON-safe copy (bigints as decimal strings). */
 const plain = <T>(v: T): unknown => JSON.parse(JSON.stringify(v, (_, x) => (typeof x === 'bigint' ? x.toString() : x)))
 
-type Service = ServiceConfig & { price: bigint; token: Hex; window: number; verifier: Address }
+type Service = ServiceConfig & { price: bigint; token: Hex; window: number; verifier: Address; notaryKeyHash: Hex }
 
 const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'upgrade', 'proxy-connection', 'te', 'trailer'])
 const ZERO_HASH = `0x${'00'.repeat(32)}` as Hex
@@ -80,7 +80,7 @@ async function checkService(deps: GatewayDeps, signer: Address, cfg: ServiceConf
   if (isAddressEqual(s.token, zeroAddress)) throw new Error(`service ${cfg.serviceId} is not registered on ${deps.chain.escrow}`)
   if (!isAddressEqual(s.verifier, signer)) throw new Error(`service ${cfg.serviceId} is settled by ${s.verifier}, not this attestor (${signer})`)
   if (originHash(cfg.upstream) !== s.originHash) throw new Error(`service ${cfg.serviceId}: upstream ${cfg.upstream} is not the registered origin`)
-  return { ...cfg, price: s.pricePerCall, token: s.token, window: s.settlementWindow, verifier: s.verifier }
+  return { ...cfg, price: s.pricePerCall, token: s.token, window: s.settlementWindow, verifier: s.verifier, notaryKeyHash: s.notaryKeyHash }
 }
 
 /** Checks every configured service against the chain and the attestor; refuses to start on mismatch. */
@@ -221,6 +221,7 @@ export async function createGateway(deps: GatewayDeps) {
 
     const result = await attestor.attest({
       callId, url: `${svc.upstream}${req.target}`, method: req.method, headers: upstreamHeaders(svc, req.headers), body: Buffer.from(req.body).toString('utf8'),
+      ...(svc.notary ? { notary: svc.notary } : {}),
     })
 
     if (result.kind !== 'verdict') {
@@ -319,6 +320,13 @@ export async function createGateway(deps: GatewayDeps) {
     const ip = (c: import('hono').Context) =>
       clientIp(c.req.raw.headers, (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress, trustProxy, ipHeader)
     const limit = (limiter: RateLimiter) => async (c: import('hono').Context, next: () => Promise<void>) => {
+      const socketIp = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress
+      // In-process requests (the MCP endpoint's free tools, the demo agent) have no socket: they are
+      // limited where they enter (/mcp, /demo/call), not here, or every MCP user would share one bucket.
+      if (!socketIp) return next()
+      // A client on this machine with no proxy in front (local development). Behind a proxy the socket
+      // is the proxy's, often loopback, so it is never exempt then.
+      if (!trustProxy && /^(?:127\.|::1$|::ffff:127\.)/.test(socketIp)) return next()
       const wait = limiter.take(ip(c))
       if (wait > 0) return c.json({ error: 'too many requests; slow down', retryAfterMs: wait }, 429, { 'Retry-After': String(Math.ceil(wait / 1000)) })
       await next()
@@ -379,6 +387,7 @@ export async function createGateway(deps: GatewayDeps) {
       [...services.values()].map((s) => ({
         serviceId: s.serviceId, endpoint: `/s/${s.serviceId}`, upstream: s.upstream, price: s.price.toString(), token: s.token,
         settlementWindow: s.window, verifier: s.verifier, escrow: chain.escrow, chainId: chain.chainId, unprotectedFallback: s.tempo ?? null,
+        notary: { keyHash: s.notaryKeyHash, label: s.notaryLabel ?? null }, legacy: !!s.legacy,
       })),
     ),
   )
@@ -427,7 +436,9 @@ export async function createGateway(deps: GatewayDeps) {
         known: !!svc,
         upstream: svc?.upstream ?? null,
         summary: svc?.summary ?? null,
-        tool: svc ? toolFor(svc).name : null,
+        tool: svc && !svc.legacy ? toolFor(svc).name : null,
+        legacy: !!svc?.legacy,
+        notary: svc ? { keyHash: svc.notaryKeyHash, label: svc.notaryLabel ?? null } : null,
         fewCalls: s.settled < 20,
         accepted: a.accepted,
         noAnswer: a.noAnswer,
@@ -658,14 +669,14 @@ export async function createGateway(deps: GatewayDeps) {
       [
         '# Fermata gateway',
         'Paid API proxy: pay with the `fermata` MPP method (escrowed, released only on a TLSNotary proof of delivery) or `tempo` (unprotected).',
-        ...[...services.values()].map((s) => `- ${s.summary ?? 'service'}: ANY /s/${s.serviceId}${s.examplePath ?? '/'}`),
+        ...[...services.values()].filter((s) => !s.legacy).map((s) => `- ${s.summary ?? 'service'}: ANY /s/${s.serviceId}${s.examplePath ?? '/'}`),
         'GET /services, GET /calls/:callId, GET /proofs/:callId (re-verify offline with `fermata-attest verify --offline`).',
         'MCP: POST /mcp (Streamable HTTP) — every service is a paid tool (MPP `fermata` method via _meta["org.paymentauth/credential"]); free tools fermata_call, fermata_verify, fermata_reconcile, fermata_vendor_scores.',
       ].join('\n'),
     ),
   )
   discovery(app as never, mppx as never, {
-    routes: [...services.values()].map((s) => ({
+    routes: [...services.values()].filter((s) => !s.legacy).map((s) => ({
       handler: offers(s, ZERO_HASH) as never,
       method: 'GET',
       path: `/s/${s.serviceId}${(s.examplePath ?? '/').split('?')[0]}`,

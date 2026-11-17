@@ -128,7 +128,10 @@ for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT; do RESOLVE+=(--resolve "ven
 # tunnel; local demo vendors (pinned with --resolve) never are.
 PROXY_ENV=(); UPSTREAM_PROXY=${FERMATA_UPSTREAM_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}
 [ -n "$UPSTREAM_PROXY" ] && PROXY_ENV=(FERMATA_UPSTREAM_PROXY="$UPSTREAM_PROXY")
-bg attestor env ${PROXY_ENV[@]+"${PROXY_ENV[@]}"} VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
+# A remote notary (REMOTE_NOTARY_ADDR, run elsewhere with deploy/notary/): its token reaches the attestor by env.
+NOTARY_TOKEN_ENV=()
+[ -n "${REMOTE_NOTARY_ADDR:-}" ] && [ -n "${REMOTE_NOTARY_TOKEN:-}" ] && NOTARY_TOKEN_ENV=(FERMATA_NOTARY_TOKENS="$REMOTE_NOTARY_ADDR=$REMOTE_NOTARY_TOKEN")
+bg attestor env ${PROXY_ENV[@]+"${PROXY_ENV[@]}"} ${NOTARY_TOKEN_ENV[@]+"${NOTARY_TOKEN_ENV[@]}"} VERIFIER_PRIVATE_KEY=$VERIFIER_KEY "$BIN" serve --listen 127.0.0.1:$ATTESTOR_PORT --rpc "$RPC" --escrow "$ESCROW" \
   --notary 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla --predicate apps/attestor/predicates --predicate "$STATE/predicates" --storage "$STATE/presentations" \
   --attempts "${ATTEST_ATTEMPTS:-$([ "${PUBLIC:-0}" = 1 ] && echo 1 || echo 3)}" --attempt-timeout-secs 10 "${RESOLVE[@]}"
 wait_port $ATTESTOR_PORT
@@ -137,49 +140,66 @@ VERIFIER_ADDRESS=$(curl -s --noproxy '*' http://127.0.0.1:$ATTESTOR_PORT/healthz
 echo "== services"
 CONFIG=$DIR/gateway.config.json
 register() { # label port window summary mcp-tool-name
-  $TSX scripts/register-service.ts --chain "$CHAIN" --rpc "$RPC" --escrow "$ESCROW" --label "$1" \
-    --upstream "https://vendor.fermata.test:$2" --notary-public-key "$NOTARY_PUBLIC_KEY" --verifier "$VERIFIER_ADDRESS" \
+  $TSX scripts/register-service.ts --chain "$CHAIN" --rpc "$RPC" --escrow "$ESCROW" --label "$1$SUFFIX" \
+    --upstream "https://vendor.fermata.test:$2" "${NOTARY_REG_ARGS[@]}" --verifier "$VERIFIER_ADDRESS" \
     --window "$3" --config "$CONFIG" --tempo-amount 0.01 --summary "$4" \
-    --tool-name "$5" --tool-path '/v1/quote?symbol={symbol}' 2>> "$DIR/register.log"
+    --tool-name "$5" --tool-path '/v1/quote?symbol={symbol}' ${LEGACY_ARG[@]+"${LEGACY_ARG[@]}"} 2>> "$DIR/register.log"
 }
-SERVICE_QUOTE=$(register quote $QUOTE_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (vendor fails ~3% of calls)." get_quote)
-SERVICE_OK=$(register quote-ok $OK_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (reliable vendor)." get_quote_reliable)
-SERVICE_500=$(register quote-500 $E500_PORT 120 "Crypto price quote from a broken vendor (always HTTP 500) — for demonstrating refunds." get_quote_broken)
-SERVICE_HANG=$(register quote-hang $HANG_PORT 30 "Crypto price quote from a vendor that never answers — for demonstrating timeout refunds." get_quote_silent)
 register_real() { # label upstream predicate summary tool-name tool-path example-path
-  $TSX scripts/register-service.ts --chain "$CHAIN" --rpc "$RPC" --escrow "$ESCROW" --label "$1" --upstream "$2" \
-    --predicate "apps/attestor/predicates/$3" --notary-public-key "$NOTARY_PUBLIC_KEY" --verifier "$VERIFIER_ADDRESS" \
-    --window 120 --config "$CONFIG" --summary "$4" --tool-name "$5" --tool-path "$6" --example-path "$7" 2>> "$DIR/register.log"
+  $TSX scripts/register-service.ts --chain "$CHAIN" --rpc "$RPC" --escrow "$ESCROW" --label "$1$SUFFIX" --upstream "$2" \
+    --predicate "apps/attestor/predicates/$3" "${NOTARY_REG_ARGS[@]}" --verifier "$VERIFIER_ADDRESS" \
+    --window 120 --config "$CONFIG" --summary "$4" --tool-name "$5" --tool-path "$6" --example-path "$7" ${LEGACY_ARG[@]+"${LEGACY_ARG[@]}"} 2>> "$DIR/register.log"
 }
-SERVICE_NPM=""; SERVICE_NPM404=""; SERVICE_COINBASE=""; SERVICE_MEMPOOL=""; SERVICE_KRAKEN=""; SERVICE_WEATHER=""
-case ",$REAL_VENDORS," in *,npm,*)
-  SERVICE_NPM=$(register_real npm-tags https://registry.npmjs.org npm-dist-tags-v1.json \
-    "Latest published versions (dist-tags) of an npm package, from the real public npm registry." \
-    npm_latest_version '/-/package/{package}/dist-tags' /-/package/mppx/dist-tags)
-  # Public mode's "npm 404" button pays this separate listing: npm's correct 404 is a proven failure,
-  # and it must not count against the npm vendor's score.
-  [ "${PUBLIC:-0}" = 1 ] && SERVICE_NPM404=$(register_real npm-missing https://registry.npmjs.org npm-dist-tags-v1.json \
-    "Demo listing: the real npm registry asked for a package that does not exist (shows a proven 404 refund)." \
-    npm_missing_demo '/-/package/{package}/dist-tags' /-/package/no-such-package-fermata-zz/dist-tags) ;; esac
-case ",$REAL_VENDORS," in *,coinbase,*)
-  SERVICE_COINBASE=$(register_real cb-spot https://api.coinbase.com coinbase-spot-v1.json \
-    "Coinbase spot price for a pair such as BTC-USD, from the real public Coinbase API." \
-    get_spot_price '/v2/prices/{pair}/spot' /v2/prices/BTC-USD/spot) ;; esac
-case ",$REAL_VENDORS," in *,mempool,*)
-  SERVICE_MEMPOOL=$(register_real btc-fees https://mempool.space mempool-fees-v1.json \
-    "Recommended Bitcoin fee rates (sat/vB) right now, from the real public mempool.space API." \
-    get_bitcoin_fees /api/v1/fees/recommended /api/v1/fees/recommended) ;; esac
-# Kraken answers a bad pair with HTTP 200 and an error body, which a predicate can only call a vendor
-# failure: the tool takes no input (a fixed pair), so no agent can make it fail on purpose.
-case ",$REAL_VENDORS," in *,kraken,*)
-  SERVICE_KRAKEN=$(register_real kraken-btc https://api.kraken.com kraken-ticker-v1.json \
-    "Kraken's BTC-USD ticker (last trade, bid, ask, 24 h volume), from the real public Kraken API." \
-    get_btc_ticker_kraken '/0/public/Ticker?pair=XBTUSD' '/0/public/Ticker?pair=XBTUSD') ;; esac
-case ",$REAL_VENDORS," in *,weather,*)
-  SERVICE_WEATHER=$(register_real weather https://api.open-meteo.com open-meteo-current-v1.json \
-    "Current temperature at a latitude and longitude, from the real public Open-Meteo API." \
-    get_current_temperature '/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m' \
-    '/v1/forecast?latitude=39.78&longitude=30.52&current=temperature_2m') ;; esac
+# Every demo service, registered under the notary in NOTARY_REG_ARGS (label + SUFFIX).
+register_all() {
+  SERVICE_QUOTE=$(register quote $QUOTE_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (vendor fails ~3% of calls)." get_quote)
+  SERVICE_OK=$(register quote-ok $OK_PORT 120 "Crypto price quote, e.g. symbol BTC-USD (reliable vendor)." get_quote_reliable)
+  SERVICE_500=$(register quote-500 $E500_PORT 120 "Crypto price quote from a broken vendor (always HTTP 500) — for demonstrating refunds." get_quote_broken)
+  SERVICE_HANG=$(register quote-hang $HANG_PORT 30 "Crypto price quote from a vendor that never answers — for demonstrating timeout refunds." get_quote_silent)
+  SERVICE_NPM=""; SERVICE_NPM404=""; SERVICE_COINBASE=""; SERVICE_MEMPOOL=""; SERVICE_KRAKEN=""; SERVICE_WEATHER=""
+  case ",$REAL_VENDORS," in *,npm,*)
+    SERVICE_NPM=$(register_real npm-tags https://registry.npmjs.org npm-dist-tags-v1.json \
+      "Latest published versions (dist-tags) of an npm package, from the real public npm registry." \
+      npm_latest_version '/-/package/{package}/dist-tags' /-/package/mppx/dist-tags)
+    # Public mode's "npm 404" button pays this separate listing: npm's correct 404 is a proven failure,
+    # and it must not count against the npm vendor's score.
+    [ "${PUBLIC:-0}" = 1 ] && SERVICE_NPM404=$(register_real npm-missing https://registry.npmjs.org npm-dist-tags-v1.json \
+      "Demo listing: the real npm registry asked for a package that does not exist (shows a proven 404 refund)." \
+      npm_missing_demo '/-/package/{package}/dist-tags' /-/package/no-such-package-fermata-zz/dist-tags) ;; esac
+  case ",$REAL_VENDORS," in *,coinbase,*)
+    SERVICE_COINBASE=$(register_real cb-spot https://api.coinbase.com coinbase-spot-v1.json \
+      "Coinbase spot price for a pair such as BTC-USD, from the real public Coinbase API." \
+      get_spot_price '/v2/prices/{pair}/spot' /v2/prices/BTC-USD/spot) ;; esac
+  case ",$REAL_VENDORS," in *,mempool,*)
+    SERVICE_MEMPOOL=$(register_real btc-fees https://mempool.space mempool-fees-v1.json \
+      "Recommended Bitcoin fee rates (sat/vB) right now, from the real public mempool.space API." \
+      get_bitcoin_fees /api/v1/fees/recommended /api/v1/fees/recommended) ;; esac
+  # Kraken answers a bad pair with HTTP 200 and an error body, which a predicate can only call a vendor
+  # failure: the tool takes no input (a fixed pair), so no agent can make it fail on purpose.
+  case ",$REAL_VENDORS," in *,kraken,*)
+    SERVICE_KRAKEN=$(register_real kraken-btc https://api.kraken.com kraken-ticker-v1.json \
+      "Kraken's BTC-USD ticker (last trade, bid, ask, 24 h volume), from the real public Kraken API." \
+      get_btc_ticker_kraken '/0/public/Ticker?pair=XBTUSD' '/0/public/Ticker?pair=XBTUSD') ;; esac
+  case ",$REAL_VENDORS," in *,weather,*)
+    SERVICE_WEATHER=$(register_real weather https://api.open-meteo.com open-meteo-current-v1.json \
+      "Current temperature at a latitude and longitude, from the real public Open-Meteo API." \
+      get_current_temperature '/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m' \
+      '/v1/forecast?latitude=39.78&longitude=30.52&current=temperature_2m') ;; esac
+}
+# Services are bound on-chain to one notary key. With a remote notary (REMOTE_NOTARY_ADDR, another
+# operator's, deploy/notary/), the services bound to the local notary stay served and scored but are
+# marked legacy (no MCP tool, no Try-it button), and the same services are registered again with the
+# suffix "2", bound to the remote notary's key: they take over the tool names and the buttons.
+NOTARY_REG_ARGS=(--notary-public-key "$NOTARY_PUBLIC_KEY" --notary-label "${LOCAL_NOTARY_LABEL:-Fermata-run}")
+SUFFIX=""; LEGACY_ARG=()
+if [ -n "${REMOTE_NOTARY_ADDR:-}" ]; then
+  LEGACY_ARG=(--legacy)
+  register_all
+  NOTARY_REG_ARGS=(--notary-public-key "${REMOTE_NOTARY_PUBLIC_KEY:?set REMOTE_NOTARY_PUBLIC_KEY (printed by the remote notary at start)}"
+    --notary "$REMOTE_NOTARY_ADDR" --notary-label "${REMOTE_NOTARY_LABEL:?set REMOTE_NOTARY_LABEL, e.g. independent: Example Labs}")
+  SUFFIX=2; LEGACY_ARG=()
+fi
+register_all
 
 # Public "try it" mode (PUBLIC=1): the demo buttons and the server-side demo agent that pays for them.
 PUBLIC_ENV=()

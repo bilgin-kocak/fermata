@@ -187,7 +187,13 @@ registering a payout for it.
 
 ### Trust model (v1)
 
-The escrow contract trusts one registered verifier key per service, which Fermata holds; the notary is a separate process (run by us in the demo, pluggable to any notary running the same TLSNotary version¹) whose only job is to be blind; the gateway is the prover². A vendor therefore trusts the Fermata operator to sign honest verdicts, including refunds. What the design adds over "trust the operator": every verdict points at a presentation anyone can download and re-verify offline against the pinned notary key, so a dishonest verdict is detectable and the evidence is portable to any future adjudicator. Independent verification is not the same as independent adjudication; roadmap items (an independent notary first, then vendor-chosen verifiers, an N-of-M verifier quorum and on-chain presentation verification) close that gap.
+The escrow contract trusts one registered verifier key per service, which Fermata holds; the notary is a separate process (run by us in the demo, pluggable to any notary running the same TLSNotary version¹) whose only job is to be blind; the gateway is the prover². A vendor therefore trusts the Fermata operator to sign honest verdicts, including refunds. What the design adds over "trust the operator": every verdict points at a presentation anyone can download and re-verify offline against the pinned notary key, so a dishonest verdict is detectable and the evidence is portable to any future adjudicator. Independent verification is not the same as independent adjudication; roadmap items (vendor-chosen verifiers, an N-of-M verifier quorum and on-chain presentation verification) close that gap.
+
+**A notary run by someone else.** [`deploy/notary/`](deploy/notary/README.md) is a one-command kit for another operator to run the notary with their own key. Fermata never sees the key.
+- The notary refuses connections without its access token.
+- Each service is routed to the notary whose key it registered on-chain. A proof from any other notary fails the binding check: no verdict, and the agent is refunded by timeout.
+- The scoreboard shows, for each vendor, which notary signs its proofs and who runs it. That name is the gateway's claim; the key hash is on-chain.
+- Until a partner runs one, the live demo's notary is Fermata's: either the original process, or a separate host and key with the same operator, and the scoreboard says which. Forging a proof then still needs only Fermata. With a partner's notary it would need Fermata and the partner acting together.
 
 ¹ *Adjusted from the brief after Milestone 0:* TLSNotary removed its notary server in
 `v0.1.0-alpha.13` and PSE's public notary (`notary.pse.dev`) has been shut down
@@ -357,7 +363,7 @@ Comparison checked against each project's public repository or specification on 
 
 ## Roadmap
 
-- **An independent notary** — a partner or a vendor runs `fermata-attest notary` with its own key; services register that key's hash and the attestor points `--notary` at it (no contract change). Fermata could then no longer produce a transcript the server never sent (note ²): only the verdict signer is trusted, and a dishonest verdict is detectable offline.
+- **An independent notary operator** — the kit is built ([`deploy/notary/`](deploy/notary/README.md): access token, per-service notary routing, migration of the demo's services); what is missing is a partner to run it. Fermata could then no longer produce a transcript the server never sent (note ²): only the verdict signer is trusted, and a dishonest verdict is detectable offline.
 - **Vendor-chosen verifiers and an N-of-M verifier quorum** — move adjudication off the Fermata operator.
 - **On-chain presentation verification** — the escrow checks the evidence itself instead of a signature over it.
 - **Vendor-hosted gateways** — the vendor runs the gateway and prover next to its API.

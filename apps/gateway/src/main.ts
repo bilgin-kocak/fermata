@@ -106,7 +106,9 @@ function onboardDeps() {
       const sid = makeServiceId(operator.account.address, input.label)
       const existing = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [sid] })
       if (existing.token !== '0x0000000000000000000000000000000000000000') throw new Error(`label "${input.label}" is taken; pick another`)
-      const reference = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [config.services[0]!.serviceId] })
+      // New listings use the notary of the current (non-legacy) services: its key is bound on-chain here.
+      const ref = config.services.find((s) => !s.legacy) ?? config.services[0]!
+      const reference = await publicClient.readContract({ address: config.escrow, abi: fermataEscrowAbi, functionName: 'getService', args: [ref.serviceId] })
       const { signer } = await attestor.health()
       const ph = predicateHash(input.predicate)
       writeFileSync(path.join(predicateDir, `${input.label}-${ph.slice(2, 10)}.json`), input.predicate)
@@ -120,7 +122,10 @@ function onboardDeps() {
         return { txHash, receipt: await publicClient.waitForTransactionReceipt({ hash: txHash, timeout: 60_000 }) }
       })
       if (receipt.status !== 'success') throw new Error(`registration reverted: ${txHash}`)
-      await add({ serviceId: sid, upstream: input.origin, examplePath: input.examplePath, summary: input.summary, tool: { name: input.toolName, description: input.summary, path: input.examplePath } })
+      await add({
+        serviceId: sid, upstream: input.origin, examplePath: input.examplePath, summary: input.summary, tool: { name: input.toolName, description: input.summary, path: input.examplePath },
+        ...(ref.notary ? { notary: ref.notary } : {}), ...(ref.notaryLabel ? { notaryLabel: ref.notaryLabel } : {}),
+      })
       return { serviceId: sid, txHash, endpoint: `/s/${sid}${input.examplePath}`, tool: input.toolName }
     },
   }

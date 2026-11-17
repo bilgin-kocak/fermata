@@ -91,6 +91,11 @@ config.services.push({
   ...(typeof args['tool-name'] === 'string'
     ? { tool: { name: args['tool-name'], path: str('tool-path', '{path}'), description: str('summary', '') || undefined } }
     : {}),
+  // The notary whose key this service registered (`--notary host:port`; default: the attestor's), who runs it, and
+  // whether the service is superseded (`--legacy`: still served and scored, no longer offered as a tool).
+  ...(typeof args.notary === 'string' ? { notary: args.notary } : {}),
+  ...(typeof args['notary-label'] === 'string' ? { notaryLabel: args['notary-label'] } : {}),
+  ...(args.legacy ? { legacy: true } : {}),
 })
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
 console.log(sid)

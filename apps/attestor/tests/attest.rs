@@ -108,6 +108,7 @@ fn request(
 ) -> ProveRequest {
     ProveRequest {
         notary: notary.to_string(),
+        notary_token: None,
         connect: format!("127.0.0.1:{port}"),
         origin: origin(port),
         roots: roots.to_vec(),
@@ -617,6 +618,7 @@ async fn real_vendor_npm() {
         .map(|p| Proxy::parse(&p).unwrap());
     let req = |target: &str| ProveRequest {
         notary: format!("127.0.0.1:{port}"),
+        notary_token: None,
         connect: "registry.npmjs.org:443".into(),
         origin: Origin::new("registry.npmjs.org", 443).unwrap(),
         roots: mozilla.clone(),

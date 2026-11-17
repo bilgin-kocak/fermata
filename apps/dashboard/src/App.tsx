@@ -855,6 +855,7 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
                   <div>
                     {s.tool ?? s.label ?? short(s.serviceId, 8)}
                     {s.fewCalls ? <span className="badge" style={{ marginLeft: 8 }}>few calls</span> : null}
+                    {s.legacy ? <span className="badge" style={{ marginLeft: 8 }} title="Superseded by a service with a separate notary; still served for existing clients">legacy</span> : null}
                   </div>
                   {s.oftenNoAnswer ? (
                     <span className="chip warning" title={`${s.noAnswer} of ${s.accepted} accepted calls got no answer (this gateway's records; no proof possible)`}>
@@ -865,6 +866,11 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
                   <div className="mono muted origin" title={s.serviceId}>
                     {s.upstream ?? short(s.serviceId, 8)}
                   </div>
+                  {s.notary ? (
+                    <div className="muted origin" title={`notary key hash ${s.notary.keyHash} (on-chain); the operator label is the gateway's claim`}>
+                      notary: {s.notary.label ?? short(s.notary.keyHash, 8)}
+                    </div>
+                  ) : null}
                 </td>
                 <td className="num">
                   {s.released}/{s.released + s.vendorFailures + s.unclassified} <span className="muted hide-sm">({pct(s.deliveryRate)})</span>

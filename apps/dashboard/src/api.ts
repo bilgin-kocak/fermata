@@ -70,6 +70,10 @@ export type VendorScore = {
   noAnswer: number
   noAnswerRate: number | null
   oftenNoAnswer: boolean
+  /** Who signs this service's proofs (the label is the gateway's claim; the key hash is on-chain). */
+  notary: { keyHash: string; label: string | null } | null
+  /** Superseded: still served and scored, no longer offered as a tool. */
+  legacy: boolean
 }
 export type Scores = { escrow: string; chainId: number; scannedTo: string; method: string; recompute: string; caveats: string[]; scores: VendorScore[] }
 

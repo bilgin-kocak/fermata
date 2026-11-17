@@ -48,6 +48,12 @@ enum Cmd {
         key: String,
         #[arg(long, default_value_t = 120)]
         timeout_secs: u64,
+        /// Require this access token (NOTARY_TOKEN): a connection must open with it or is closed.
+        #[arg(long, env = "NOTARY_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Read the access token from this file instead (first line).
+        #[arg(long, conflicts_with = "token")]
+        token_file: Option<PathBuf>,
     },
     /// Prove one request to the vendor and write the presentation.
     Prove {
@@ -142,6 +148,15 @@ enum Cmd {
 struct Net {
     #[arg(long, default_value = "127.0.0.1:7047")]
     notary: String,
+    /// `host:port=token`: the access token of a notary that requires one (repeatable; also
+    /// FERMATA_NOTARY_TOKENS, comma-separated).
+    #[arg(
+        long = "notary-token",
+        env = "FERMATA_NOTARY_TOKENS",
+        value_delimiter = ',',
+        hide_env_values = true
+    )]
+    notary_tokens: Vec<String>,
     /// PEM with the vendor CA(s) (repeatable).
     #[arg(long)]
     ca: Vec<PathBuf>,
@@ -167,6 +182,18 @@ struct Net {
 }
 
 impl Net {
+    fn notary_token_map(&self) -> Result<HashMap<String, String>> {
+        self.notary_tokens
+            .iter()
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| {
+                t.split_once('=')
+                    .map(|(a, b)| (a.trim().to_string(), b.trim().to_string()))
+                    .context("--notary-token must be host:port=token")
+            })
+            .collect()
+    }
+
     fn resolve_map(&self) -> Result<HashMap<String, String>> {
         self.resolve
             .iter()
@@ -202,12 +229,27 @@ async fn main() -> Result<()> {
             roots,
             key,
             timeout_secs,
+            token,
+            token_file,
         } => {
             let key = parse_hex32(&key)?;
+            let token = match token_file {
+                Some(path) => Some(
+                    std::fs::read_to_string(&path)
+                        .with_context(|| format!("reading {}", path.display()))?
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
+                ),
+                None => token,
+            }
+            .filter(|t| !t.is_empty());
             let public = notary::public_key(&key)?;
             println!(
                 "{}",
-                json!({ "notaryKey": hex0x(&public), "notaryKeyHash": hex0x(&notary_key_hash(&public)), "listen": listen })
+                json!({ "notaryKey": hex0x(&public), "notaryKeyHash": hex0x(&notary_key_hash(&public)), "listen": listen, "tokenRequired": token.is_some() })
             );
             let listener = TcpListener::bind(&listen).await?;
             notary::run(
@@ -215,6 +257,7 @@ async fn main() -> Result<()> {
                 trust_roots(&ca, roots.is_some())?,
                 key,
                 Duration::from_secs(timeout_secs),
+                token,
             )
             .await
         }
@@ -248,6 +291,7 @@ async fn main() -> Result<()> {
                 _ => None,
             };
             let request = ProveRequest {
+                notary_token: net.notary_token_map()?.remove(&net.notary),
                 notary: net.notary.clone(),
                 connect: pinned.unwrap_or(authority),
                 origin,
@@ -360,6 +404,7 @@ async fn main() -> Result<()> {
                 mozilla_roots: net.roots.is_some(),
                 upstream_proxy: net.upstream_proxy.clone(),
                 notary: net.notary.clone(),
+                notary_tokens: net.notary_token_map()?,
                 predicates,
                 key: parse_hex32(&signer)?,
                 storage,

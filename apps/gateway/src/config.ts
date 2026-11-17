@@ -19,6 +19,15 @@ export type ServiceConfig = {
   onboarded?: boolean
   /** Unprotected fallback: plain `tempo` charge paid straight to the vendor, no proof. */
   tempo?: { amount: string; recipient: Address }
+  /**
+   * This service's notary, `host:port` (default: the attestor's). Must be the notary whose key the
+   * service registered on-chain: any other fails the attestor's binding check (no verdict).
+   */
+  notary?: string
+  /** Who runs that notary, as shown with the scores ("independent: <operator>", "Fermata-run"). A claim, not checked. */
+  notaryLabel?: string
+  /** Still served (existing clients), shown on the scoreboard, but not offered as an MCP tool or Try-it button. */
+  legacy?: boolean
 }
 
 export type GatewayConfig = {
