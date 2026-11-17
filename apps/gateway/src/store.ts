@@ -34,6 +34,10 @@ export type CallRecord = {
   notaryBytes?: { sent: number; received: number }
   signer?: Hex
   error?: string
+  /** The vendor's HTTP status as proved (null: the answer was not HTTP). Classifies proven failures. */
+  vendorStatus?: number | null
+  /** No transcript because the vendor never answered (or broke the connection): the no-answer rate. */
+  noAnswer?: boolean
   /** No verdict because the attestor failed (not the vendor): the sweeper retries `/v1/verify` inside the window. */
   recoverable?: boolean
   recoverTries?: number

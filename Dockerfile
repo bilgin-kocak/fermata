@@ -32,7 +32,7 @@ ENV FERMATA_ATTEST_BIN=/usr/local/bin/fermata-attest \
     GATEWAY_HOST=0.0.0.0 \
     GATEWAY_TRUST_PROXY=2 \
     FERMATA_STATE_DIR=/data/state \
-    REAL_VENDORS=npm
+    REAL_VENDORS=npm,coinbase,mempool,kraken
 # Railway sets PORT; the gateway is the only process listening beyond localhost. GATEWAY_TRUST_PROXY=2:
 # Railway's edge appends the visitor's address and then its own hop to X-Forwarded-For.
 CMD ["bash", "-c", "GATEWAY_PORT=${PORT:-4300} exec bash scripts/demo-stack.sh run --chain moderato"]

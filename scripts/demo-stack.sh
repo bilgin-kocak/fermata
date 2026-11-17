@@ -116,7 +116,8 @@ PORT=$QUOTE_PORT CHAOS_RATE=0.03 bg vendor-quote node apps/vendor/server.mjs
 PORT=$OK_PORT bg vendor-ok node apps/vendor/server.mjs
 PORT=$E500_PORT CHAOS=500 bg vendor-500 node apps/vendor/server.mjs
 PORT=$HANG_PORT CHAOS=hang bg vendor-hang node apps/vendor/server.mjs
-# Real vendors (REAL_VENDORS=npm,coinbase; default npm; "" for none) are checked against Mozilla's roots.
+# Real vendors (REAL_VENDORS=npm,coinbase,mempool,kraken,weather; default npm; "" for none) are checked against Mozilla's roots.
+# weather (Open-Meteo) is opt-in: its free tier rate-limits shared egress IPs (429) and sometimes stalls.
 REAL_VENDORS=${REAL_VENDORS-npm}
 NOTARY_PRIVATE_KEY=$NOTARY_KEY RUST_LOG=error bg notary "$BIN" notary --listen 127.0.0.1:$NOTARY_PORT --ca "$CA" --roots mozilla
 for p in $QUOTE_PORT $OK_PORT $E500_PORT $HANG_PORT $NOTARY_PORT; do wait_port "$p"; done
@@ -150,7 +151,7 @@ register_real() { # label upstream predicate summary tool-name tool-path example
     --predicate "apps/attestor/predicates/$3" --notary-public-key "$NOTARY_PUBLIC_KEY" --verifier "$VERIFIER_ADDRESS" \
     --window 120 --config "$CONFIG" --summary "$4" --tool-name "$5" --tool-path "$6" --example-path "$7" 2>> "$DIR/register.log"
 }
-SERVICE_NPM=""; SERVICE_NPM404=""; SERVICE_COINBASE=""
+SERVICE_NPM=""; SERVICE_NPM404=""; SERVICE_COINBASE=""; SERVICE_MEMPOOL=""; SERVICE_KRAKEN=""; SERVICE_WEATHER=""
 case ",$REAL_VENDORS," in *,npm,*)
   SERVICE_NPM=$(register_real npm-tags https://registry.npmjs.org npm-dist-tags-v1.json \
     "Latest published versions (dist-tags) of an npm package, from the real public npm registry." \
@@ -164,18 +165,38 @@ case ",$REAL_VENDORS," in *,coinbase,*)
   SERVICE_COINBASE=$(register_real cb-spot https://api.coinbase.com coinbase-spot-v1.json \
     "Coinbase spot price for a pair such as BTC-USD, from the real public Coinbase API." \
     get_spot_price '/v2/prices/{pair}/spot' /v2/prices/BTC-USD/spot) ;; esac
+case ",$REAL_VENDORS," in *,mempool,*)
+  SERVICE_MEMPOOL=$(register_real btc-fees https://mempool.space mempool-fees-v1.json \
+    "Recommended Bitcoin fee rates (sat/vB) right now, from the real public mempool.space API." \
+    get_bitcoin_fees /api/v1/fees/recommended /api/v1/fees/recommended) ;; esac
+# Kraken answers a bad pair with HTTP 200 and an error body, which a predicate can only call a vendor
+# failure: the tool takes no input (a fixed pair), so no agent can make it fail on purpose.
+case ",$REAL_VENDORS," in *,kraken,*)
+  SERVICE_KRAKEN=$(register_real kraken-btc https://api.kraken.com kraken-ticker-v1.json \
+    "Kraken's BTC-USD ticker (last trade, bid, ask, 24 h volume), from the real public Kraken API." \
+    get_btc_ticker_kraken '/0/public/Ticker?pair=XBTUSD' '/0/public/Ticker?pair=XBTUSD') ;; esac
+case ",$REAL_VENDORS," in *,weather,*)
+  SERVICE_WEATHER=$(register_real weather https://api.open-meteo.com open-meteo-current-v1.json \
+    "Current temperature at a latitude and longitude, from the real public Open-Meteo API." \
+    get_current_temperature '/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m' \
+    '/v1/forecast?latitude=39.78&longitude=30.52&current=temperature_2m') ;; esac
 
 # Public "try it" mode (PUBLIC=1): the demo buttons and the server-side demo agent that pays for them.
 PUBLIC_ENV=()
 if [ "${PUBLIC:-0}" = 1 ]; then
   echo "== public demo mode"
-  KINDS=$(jq -n --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" --arg npm "$SERVICE_NPM" --arg npm404 "$SERVICE_NPM404" '
+  KINDS=$(jq -n --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" --arg npm "$SERVICE_NPM" --arg npm404 "$SERVICE_NPM404" \
+    --arg coinbase "$SERVICE_COINBASE" --arg mempool "$SERVICE_MEMPOOL" --arg kraken "$SERVICE_KRAKEN" --arg weather "$SERVICE_WEATHER" '
     {reliable: {serviceId: $ok, path: "/v1/quote?symbol=BTC-USD", label: "Reliable vendor", description: "A quote API that answers correctly: the proof passes and the vendor is paid."},
      broken: {serviceId: $e500, path: "/v1/quote?symbol=ETH-USD", label: "Broken vendor", description: "Answers HTTP 500: the proof shows the failure and you are refunded."},
      silent: {serviceId: $hang, path: "/v1/quote?symbol=SOL-USD", label: "Silent vendor", description: "Never answers: no proof, no verdict; the contract refunds after the 30 s window."}}
     + (if $npm == "" then {} else
       {npm: {serviceId: $npm, path: "/-/package/mppx/dist-tags", label: "Real API: npm registry", description: "The public npm registry over the open internet: a real 200, proved and paid."},
-       "npm-404": {serviceId: (if $npm404 == "" then $npm else $npm404 end), path: "/-/package/no-such-package-fermata-zz/dist-tags", label: "Real API: npm 404", description: "npm\u0027s genuine 404 for a missing package: proved, and refunded."}} end)')
+       "npm-404": {serviceId: (if $npm404 == "" then $npm else $npm404 end), path: "/-/package/no-such-package-fermata-zz/dist-tags", label: "Real API: npm 404", description: "npm\u0027s genuine 404 for a missing package: proved, and refunded (a client error: it does not count against npm)."}} end)
+    + (if $coinbase == "" then {} else {coinbase: {serviceId: $coinbase, path: "/v2/prices/BTC-USD/spot", label: "Real API: Coinbase BTC price", description: "The live BTC-USD spot price from Coinbase\u0027s public API, proved and paid."}} end)
+    + (if $mempool == "" then {} else {"btc-fees": {serviceId: $mempool, path: "/api/v1/fees/recommended", label: "Real API: Bitcoin fees", description: "Recommended Bitcoin fee rates from mempool.space, proved and paid."}} end)
+    + (if $kraken == "" then {} else {kraken: {serviceId: $kraken, path: "/0/public/Ticker?pair=XBTUSD", label: "Real API: Kraken BTC ticker", description: "Kraken\u0027s live BTC-USD ticker from its public API, proved and paid: a second price vendor to compare on the scoreboard."}} end)
+    + (if $weather == "" then {} else {weather: {serviceId: $weather, path: "/v1/forecast?latitude=39.78&longitude=30.52&current=temperature_2m", label: "Real API: weather", description: "The current temperature in Eskişehir from Open-Meteo, proved and paid."}} end)')
   jq --argjson kinds "$KINDS" '.demo = {kinds: $kinds, perIpSeconds: (env.DEMO_PER_IP_SECONDS // "60" | tonumber), perIpPerDay: (env.DEMO_PER_IP_PER_DAY // "15" | tonumber), dailyCap: (env.DEMO_DAILY_CAP // "500" | tonumber), maxServicePrice: (env.DEMO_MAX_PRICE // "10000")}' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   if [ "$CHAIN" = anvil ]; then
     DEMO_AGENT_PRIVATE_KEY=$(cast wallet new --json | jq -r '(.data // .) | if type == "array" then .[0] else . end | .private_key')
@@ -206,10 +227,12 @@ wait_port "$GATEWAY_PORT" 180 || { cat "$DIR/gateway.log"; exit 1; }
 jq -n --arg chain "$CHAIN" --arg rpc "$RPC" --arg escrow "$ESCROW" --arg gateway "http://127.0.0.1:$GATEWAY_PORT" \
   --arg verifier "$VERIFIER_ADDRESS" --arg explorer "$EXPLORER" --arg attestor "http://127.0.0.1:$ATTESTOR_PORT" \
   --arg quote "$SERVICE_QUOTE" --arg ok "$SERVICE_OK" --arg e500 "$SERVICE_500" --arg hang "$SERVICE_HANG" \
-  --arg npm "$SERVICE_NPM" --arg coinbase "$SERVICE_COINBASE" \
+  --arg npm "$SERVICE_NPM" --arg coinbase "$SERVICE_COINBASE" --arg mempool "$SERVICE_MEMPOOL" --arg kraken "$SERVICE_KRAKEN" --arg weather "$SERVICE_WEATHER" \
   '{chain:$chain, rpc:$rpc, escrow:$escrow, gateway:$gateway, attestor:$attestor, verifier:$verifier, explorer:(if $explorer=="" then null else $explorer end),
     services:{quote:$quote, ok:$ok, "e500":$e500, hang:$hang},
-    real:({} + (if $npm=="" then {} else {npm:$npm} end) + (if $coinbase=="" then {} else {coinbase:$coinbase} end))}' > "$DIR/stack.json"
+    real:({} + (if $npm=="" then {} else {npm:$npm} end) + (if $coinbase=="" then {} else {coinbase:$coinbase} end)
+      + (if $mempool=="" then {} else {mempool:$mempool} end) + (if $kraken=="" then {} else {kraken:$kraken} end)
+      + (if $weather=="" then {} else {weather:$weather} end))}' > "$DIR/stack.json"
 echo "demo stack up on $CHAIN: gateway http://127.0.0.1:$GATEWAY_PORT (dashboard /dashboard) — $DIR/stack.json; stop with: bash scripts/demo-stack.sh down"
 
 if [ "$CMD" = run ]; then

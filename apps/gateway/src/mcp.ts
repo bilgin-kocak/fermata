@@ -77,7 +77,7 @@ const FREE_TOOLS: Tool[] = [
   {
     name: 'fermata_vendor_scores',
     description:
-      "Free. Every vendor's proven delivery record, computed only from on-chain escrow events: calls released, refunded on a proven failure, refunded on timeout, distinct agents, and a score (Wilson 95 % lower bound of the delivery rate). Use it to pick the most reliable service before paying; each service lists its MCP tool name.",
+      "Free. Every vendor's proven delivery record from the escrow's on-chain events and public proofs: calls released, proven vendor failures, client errors (proven 4xx, not counted against the vendor), timeouts, the share of accepted calls that got no answer (this gateway's records), distinct agents, and a score (Wilson 95 % lower bound of the delivery rate). Use it to pick the most reliable service before paying; each service lists its MCP tool name.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -147,8 +147,18 @@ export function mcpHandler(deps: McpDeps) {
   async function freeTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     if (name === 'fermata_vendor_scores') {
       const res = await deps.app.request('/scores')
-      const body = (await res.json()) as { scores: { label: string | null; tool: string | null; released: number; settled: number; deliveryRate: number | null; score: number; provenFailures: number; timeouts: number; distinctAgents: number; fewCalls: boolean }[] }
-      const lines = body.scores.map((s) => `${s.tool ?? s.label ?? '?'}: ${s.released}/${s.settled} delivered${s.deliveryRate === null ? '' : ` (${(s.deliveryRate * 100).toFixed(0)} %)`}, score ${(s.score * 100).toFixed(1)} %, ${s.provenFailures} proven failures, ${s.timeouts} timeouts, ${s.distinctAgents} agents${s.fewCalls ? ', few calls' : ''}`)
+      type Row = { label: string | null; tool: string | null; released: number; deliveryRate: number | null; score: number; vendorFailures: number; unclassified: number; clientErrors: number; timeouts: number; distinctAgents: number; fewCalls: boolean; accepted: number; noAnswer: number; oftenNoAnswer: boolean }
+      const body = (await res.json()) as { scores: Row[] }
+      const lines = body.scores.map((s) => {
+        const ranked = s.released + s.vendorFailures + s.unclassified
+        return [
+          `${s.tool ?? s.label ?? '?'}: ${s.released}/${ranked} delivered${s.deliveryRate === null ? '' : ` (${(s.deliveryRate * 100).toFixed(0)} %)`}, score ${(s.score * 100).toFixed(1)} %`,
+          `${s.vendorFailures + s.unclassified} proven vendor failures`,
+          `${s.clientErrors} client errors (4xx, not counted)`,
+          `no answer ${s.noAnswer}/${s.accepted}${s.oftenNoAnswer ? ' (often no answer)' : ''}`,
+          `${s.timeouts} timeouts, ${s.distinctAgents} agents${s.fewCalls ? ', few calls' : ''}`,
+        ].join(', ')
+      })
       return { content: [text(lines.join('\n') || 'no calls yet')], structuredContent: body as unknown as Record<string, unknown>, isError: !res.ok }
     }
     const callId = String(args.callId ?? '')

@@ -4,7 +4,8 @@
 #   bash deploy/smoke.sh https://fermata.example.com        (or http://127.0.0.1:4300 locally)
 #
 # /info, /scores, /demo/status, the MCP endpoint, one paid demo call per available kind among
-# reliable / npm (released) and broken (refunded), each proof re-verified offline. Exit 0 only if all pass.
+# reliable / npm / coinbase / btc-fees / kraken / weather (released) and broken (refunded), each proof
+# re-verified offline. Exit 0 only if all pass.
 set -uo pipefail
 BASE=${1:?usage: smoke.sh <base-url>}
 BASE=${BASE%/}
@@ -45,6 +46,10 @@ demo() { # kind expected-outcome
 demo reliable DELIVERED
 demo broken FAILED
 demo npm DELIVERED
+demo coinbase DELIVERED
+demo btc-fees DELIVERED
+demo kraken DELIVERED
+demo weather DELIVERED
 
 echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]

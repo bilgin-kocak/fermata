@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { keccak256, toHex, type Address, type Hex } from 'viem'
-import { aggregateScores, fetchEscrowLogs, serviceLabelOf, wilsonLower, type EscrowLog } from '../src/scores.ts'
+import { aggregateScores, failureClass, fetchEscrowLogs, provenStatus, serviceLabelOf, wilsonLower, type EscrowLog } from '../src/scores.ts'
 import { serviceId } from '../src/serviceId.ts'
 
 const owner = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' as Address
@@ -64,6 +64,38 @@ describe('aggregateScores', () => {
     const logs = calls(A, ['released'])
     const [s] = aggregateScores([...logs, logs[1]!])
     expect(s).toMatchObject({ released: 1, settled: 1, open: 0 })
+  })
+
+  it('client errors (proven 4xx) are reported, not ranked: a griefer\'s bad requests do not sink a vendor', () => {
+    const good = calls(A, Array(20).fill('released'))
+    const before = aggregateScores(good)[0]!
+    const grief = calls(A, Array(10).fill('failed'), agents[1])
+    const griefIds = new Set(grief.filter((l) => l.eventName === 'Refunded').map((l) => l.args.callId))
+    const classify = (id: Hex) => (griefIds.has(id) ? ('client' as const) : undefined)
+    const after = aggregateScores([...good, ...grief], classify)[0]!
+    expect(after).toMatchObject({ provenFailures: 10, clientErrors: 10, vendorFailures: 0, unclassified: 0, deliveryRate: 1 })
+    expect(after.score).toBe(before.score)
+    // Without classification the same failures count, as before.
+    expect(aggregateScores([...good, ...grief])[0]).toMatchObject({ unclassified: 10, deliveryRate: 20 / 30 })
+  })
+
+  it('a vendor failure (5xx, broken answer) still lowers the score', () => {
+    const logs = [...calls(A, Array(20).fill('released')), ...calls(A, ['failed'])]
+    const failed = logs.filter((l) => l.eventName === 'Refunded').map((l) => l.args.callId)
+    const s = aggregateScores(logs, (id) => (failed.includes(id) ? 'vendor' : undefined))[0]!
+    expect(s).toMatchObject({ vendorFailures: 1, clientErrors: 0, deliveryRate: 20 / 21 })
+  })
+
+  it('failureClass: 4xx is the client\'s, anything else (5xx, 200 with a wrong body) the vendor\'s', () => {
+    expect([404, 400, 429, 500, 200, 302].map(failureClass)).toEqual(['client', 'client', 'client', 'vendor', 'vendor', 'vendor'])
+    expect(failureClass(null)).toBeUndefined()
+    expect(provenStatus('HTTP/1.1 404 Not Found\r\ncontent-type: text/plain\r\n\r\nno')).toBe(404)
+    expect(provenStatus('garbage')).toBeNull()
+  })
+
+  it('a hold seen twice (overlapping scans) counts once', () => {
+    const logs = calls(A, ['open'])
+    expect(aggregateScores([...logs, ...logs])[0]).toMatchObject({ held: 1, open: 1 })
   })
 
   it('a service with no settled calls has no rate and scores 0', () => {

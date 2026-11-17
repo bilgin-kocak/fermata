@@ -11,13 +11,11 @@
 //
 // Needs the attestor binary once: (cd apps/attestor && cargo +1.95.0 build --release)
 // --gateway defaults to the running demo stack (out/demo/stack.json), else the live demo.
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import { createPublicClient, http, keccak256, parseEventLogs, type Address, type Hex } from 'viem'
-import { escrowDeployment, fermataEscrowAbi, getService, MODERATO, originHash, predicateHash, tempoChain } from 'fermata-sdk'
+import { existsSync, readFileSync } from 'node:fs'
+import { createPublicClient, http, parseEventLogs, type Address, type Hex } from 'viem'
+import { escrowDeployment, fermataEscrowAbi, getService, MODERATO, tempoChain } from 'fermata-sdk'
 import { loadDotEnv, parseArgs } from './lib/args.ts'
+import { gatewayFiles, requireAttestBin, verifyProof } from './lib/proofs.ts'
 
 const LIVE = 'https://fermata-production-9378.up.railway.app'
 const ZERO32 = `0x${'00'.repeat(32)}`
@@ -33,8 +31,8 @@ const gateway = (typeof args.gateway === 'string' ? args.gateway : stack?.gatewa
 const rpc = typeof args.rpc === 'string' ? args.rpc : stack?.gateway === gateway && stack.rpc ? stack.rpc : MODERATO.rpcUrl
 // The escrow is never taken from the gateway: the repo's deployment record, or yours.
 const escrow = (typeof args.escrow === 'string' ? args.escrow : stack?.gateway === gateway && stack.escrow ? stack.escrow : escrowDeployment('moderato')?.address) as Address
-const bin = process.env.FERMATA_ATTEST_BIN ?? new URL('../apps/attestor/target/release/fermata-attest', import.meta.url).pathname
-if (!existsSync(bin)) throw new Error(`no offline verifier at ${bin}: (cd apps/attestor && cargo +1.95.0 build --release), or set FERMATA_ATTEST_BIN`)
+const bin = requireAttestBin()
+const files = gatewayFiles(gateway)
 
 const client = createPublicClient({ chain: tempoChain(rpc), transport: http(rpc) })
 const ok = (cond: boolean, what: string) => {
@@ -42,11 +40,7 @@ const ok = (cond: boolean, what: string) => {
   if (!cond) process.exitCode = 1
   return cond
 }
-const get = async (p: string) => {
-  const res = await fetch(`${gateway}${p}`)
-  if (!res.ok) throw new Error(`GET ${gateway}${p}: HTTP ${res.status}`)
-  return res
-}
+const get = files.get
 
 console.log(`re-verifying ${callId}\n  gateway ${gateway} (serves bytes only)\n  chain   ${rpc}, escrow ${escrow}\n`)
 
@@ -77,37 +71,11 @@ if (onchainPresentation.toLowerCase() === ZERO32) {
   process.exit(0)
 }
 
-// 3. Bytes from the gateway, each checked against the chain before use.
-const dir = mkdtempSync(path.join(tmpdir(), 'fermata-reverify-'))
-const presentation = new Uint8Array(await (await get(`/proofs/${callId}`)).arrayBuffer())
-ok(keccak256(presentation) === onchainPresentation.toLowerCase(), `presentation keccak256 = on-chain presentationHash ${onchainPresentation.slice(0, 10)}…`)
-writeFileSync(path.join(dir, 'call.tlsn'), presentation)
-const predicate = new Uint8Array(await (await get(`/predicates/${svc.predicateHash}`)).arrayBuffer())
-ok(predicateHash(predicate) === svc.predicateHash.toLowerCase(), `predicate sha256 = on-chain predicateHash ${svc.predicateHash.slice(0, 10)}…`)
-writeFileSync(path.join(dir, 'predicate.json'), predicate)
-const services = (await (await get('/services')).json()) as { serviceId: string; upstream: string }[]
-const upstream = services.find((s) => s.serviceId.toLowerCase() === serviceId.toLowerCase())?.upstream
-ok(!!upstream && originHash(upstream) === svc.originHash, `origin ${upstream} = on-chain originHash ${svc.originHash.slice(0, 10)}…`)
-// Mock vendors use the demo's dev CA (fetched; it only widens which certificates are accepted);
-// real vendors must chain to Mozilla's roots.
-const trust = upstream && new URL(upstream).hostname === 'vendor.fermata.test'
-  ? (writeFileSync(path.join(dir, 'ca.pem'), await (await get('/ca.pem')).text()), ['--ca', path.join(dir, 'ca.pem')])
-  : ['--roots', 'mozilla']
-if (process.exitCode) process.exit(1)
-
-// 4. The offline verifier: notary signature, certificate, every hash recomputed, the predicate re-run.
-let out: Record<string, unknown>
-try {
-  out = JSON.parse(execFileSync(bin, [
-    'verify', '--offline', '--presentation', path.join(dir, 'call.tlsn'), ...trust, '--call-id', callId,
-    '--predicate', path.join(dir, 'predicate.json'), '--service-id', serviceId, '--request-hash', requestHash,
-    '--origin-hash', svc.originHash, '--notary-key-hash', svc.notaryKeyHash,
-  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
-} catch (e) {
-  console.log(`✗ fermata-attest verify --offline failed:\n${(e as { stderr?: string }).stderr ?? (e as Error).message}`)
-  process.exit(1)
-}
-const outcome = out.outcome === 1 || out.outcome === 'DELIVERED' ? 'DELIVERED' : out.outcome === 2 || out.outcome === 'FAILED' ? 'FAILED' : String(out.outcome)
-ok(out.ok === true, 'notary signature, certificate chain and the recomputed requestHash, originHash, notaryKeyHash all check out')
-ok((outcome === 'DELIVERED') === (settled!.eventName === 'Released'), `the predicate re-run says ${outcome}; the escrow ${settled!.eventName === 'Released' ? 'released' : 'refunded'}`)
+// 3–4. Bytes from the gateway, each checked against the chain before use, then the offline verifier:
+// notary signature, certificate, every hash recomputed, the predicate re-run.
+const result = await verifyProof(files, { callId, serviceId, requestHash, presentationHash: onchainPresentation, service: svc }, bin)
+for (const c of result.checks) ok(c.ok, c.what)
+if (!result.outcome) process.exit(1)
+const outcome = result.outcome
+ok((outcome === 'DELIVERED') === (settled!.eventName === 'Released'), `the predicate re-run says ${outcome} (proven HTTP ${result.status ?? 'none'}); the escrow ${settled!.eventName === 'Released' ? 'released' : 'refunded'}`)
 console.log(`\n${process.exitCode ? 'MISMATCH' : 'VERIFIED'}: ${callId} (${outcome}), checked against the chain, not the gateway's word.`)
