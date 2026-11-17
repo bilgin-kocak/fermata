@@ -18,7 +18,7 @@
 //   FERMATA_TRUSTED_VERIFIERS  verifier address(es) the agent trusts (never taken from a gateway; default:
 //                              the live demo's verifier, and only when the gateway is the live demo)
 //   FERMATA_MAX_PRICE          max price per call, base units       (default 100000 = 0.10)
-//   FERMATA_BUDGET             max total held per session           (default 1000000 = 1.00)
+//   FERMATA_BUDGET             max total held per session, refunds given back (default 1000000 = 1.00)
 //   FERMATA_MAX_WINDOW         longest settlement window accepted, seconds (default 3600)
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -35,6 +35,7 @@ import { createPublicClient, createWalletClient, getAddress, http, isAddressEqua
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { escrowDeployment, fermata, getHold, HoldStatus, reclaim, tempoChain, tip20Abi, TOKENS, type EscrowNetwork } from 'fermata-sdk'
 import pkg from '../package.json' with { type: 'json' }
+import { Budget, lockFile, plainError, withNonceRetry } from './guard.ts'
 
 const log = (m: string) => process.stderr.write(`[fermata-mcp] ${m}\n`) // stdout is the MCP channel
 const env = (k: string, d?: string) => process.env[k] || d
@@ -85,7 +86,7 @@ const text = (t: string) => ({ type: 'text' as const, text: t })
 /** How long a paid call may take, from the payment to the vendor's proven answer (proving and settling included). */
 const PAID_CALL_TIMEOUT_MS = 180_000
 /** One tool call's holds and decline reason: AsyncLocalStorage follows the call through mppx's payment flow. */
-type PaidCall = { holds: { callId: Hex; holdTx: Hex }[]; declined?: string }
+type PaidCall = { holds: { callId: Hex; holdTx: Hex }[]; amount?: bigint; declined?: string }
 const paidCall = new AsyncLocalStorage<PaidCall>()
 
 /**
@@ -133,7 +134,9 @@ export async function testnetAgentKey(rpc: string, file = path.join(homedir(), '
 export function createBridge(cfg: BridgeConfig) {
   const chain = tempoChain(cfg.rpc)
   const client = createPublicClient({ chain, transport: http(cfg.rpc) })
-  let held = 0n
+  const budget = new Budget(cfg.budget)
+  /** This session's held calls and their amounts: a refund (proven failure, reclaim) is given back once. */
+  const sessionHolds = new Map<string, bigint>()
   let calls = 0
   // Error text goes back to the model: keep an RPC URL's path and query (an API key?) out of it.
   const rpcOrigin = new URL(cfg.rpc).origin
@@ -149,6 +152,8 @@ export function createBridge(cfg: BridgeConfig) {
   const agent = (cfg.agentKey ? Promise.resolve(cfg.agentKey) : testnetAgentKey(cfg.rpc)).then((key) => {
     const account = privateKeyToAccount(key)
     const wallet = createWalletClient({ account, chain, transport: http(cfg.rpc) })
+    // Sessions paying from the same wallet send their holds one at a time (else their nonces collide).
+    const lock = path.join(homedir(), '.fermata', 'locks', `${account.address.toLowerCase()}.lock`)
     const method = fermata({
       wallet,
       client,
@@ -168,13 +173,24 @@ export function createBridge(cfg: BridgeConfig) {
           // The amount reserved by the spending guard is given back when no hold is made (an untrusted
           // service, a wrong price, an unfunded wallet…), so failed attempts don't use up the budget.
           createCredential: async (args: Parameters<typeof method.createCredential>[0]) => {
+            const amount = BigInt(args.challenge.request.amount)
+            const release = await lockFile(lock).catch((e: Error) => {
+              budget.cancel(amount)
+              throw e
+            })
             try {
-              const credential = await method.createCredential(args)
+              const credential = await withNonceRetry(() => method.createCredential(args))
               calls++
+              const call = paidCall.getStore()
+              if (call) call.amount = amount
+              const callId = args.challenge.request.callId
+              if (callId) sessionHolds.set(callId.toLowerCase(), amount)
               return credential
             } catch (e) {
-              held -= BigInt(args.challenge.request.amount)
+              budget.cancel(amount)
               throw e
+            } finally {
+              release()
             }
           },
         },
@@ -193,8 +209,7 @@ export function createBridge(cfg: BridgeConfig) {
         if (typeof raw !== 'string' || !/^[1-9][0-9]*$/.test(raw)) return decline(`malformed price ${JSON.stringify(raw)}`)
         const amount = BigInt(raw)
         if (amount > cfg.maxPrice) return decline(`price ${amount} is above FERMATA_MAX_PRICE ${cfg.maxPrice}`)
-        if (held + amount > cfg.budget) return decline(`price ${amount} would exceed this session's FERMATA_BUDGET (${held} of ${cfg.budget} already held)`)
-        held += amount
+        if (!budget.reserve(amount)) return decline(`price ${amount} would exceed this session's FERMATA_BUDGET (${budget.net} of ${cfg.budget} held and not refunded)`)
         return true
       },
     })
@@ -216,7 +231,7 @@ export function createBridge(cfg: BridgeConfig) {
         ...tools,
         {
           name: 'fermata_wallet',
-          description: "Free. The agent's testnet wallet: address, pathUSD balance, and what this session has held so far against its budget.",
+          description: "Free. The agent's testnet wallet: address, pathUSD balance, and this session's budget: held so far, refunded (proven failures, reclaims), and what is left.",
           inputSchema: { type: 'object' as const, properties: {} },
         },
         {
@@ -232,11 +247,22 @@ export function createBridge(cfg: BridgeConfig) {
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     const { name, arguments: args } = request.params
     const { account, wallet, paying } = await ready
-    const failed = (why: string): CallToolResult => ({ content: [text(`Fermata: ${why}`)], isError: true })
+    const failed = (why: string): CallToolResult => ({ content: [text(`Fermata: ${plainError(why, { wallet: account.address, gateway: cfg.gateway })}`)], isError: true })
+    /** A payment of this session came back to the wallet: its amount can be spent again (once). */
+    const refunded = (callId: string) => {
+      const amount = sessionHolds.get(callId.toLowerCase())
+      if (amount === undefined) return
+      sessionHolds.delete(callId.toLowerCase())
+      budget.refund(amount)
+    }
     if (name === 'fermata_wallet') {
       try {
         const balance = await client.readContract({ address: TOKENS.pathUSD as Address, abi: tip20Abi, functionName: 'balanceOf', args: [account.address] })
-        const info = { address: account.address, pathUSD: Number(balance) / 1e6, paidCallsThisSession: calls, heldThisSession: Number(held) / 1e6, budget: Number(cfg.budget) / 1e6, maxPricePerCall: Number(cfg.maxPrice) / 1e6 }
+        const info = {
+          address: account.address, pathUSD: Number(balance) / 1e6, paidCallsThisSession: calls,
+          heldThisSession: Number(budget.held) / 1e6, refundedThisSession: Number(budget.refunded) / 1e6,
+          budget: Number(cfg.budget) / 1e6, budgetLeft: Number(budget.left) / 1e6, maxPricePerCall: Number(cfg.maxPrice) / 1e6,
+        }
         return { content: [text(JSON.stringify(info, null, 2))], structuredContent: info }
       } catch (e) {
         return failed(explain(e))
@@ -252,6 +278,7 @@ export function createBridge(cfg: BridgeConfig) {
           if (!isAddressEqual(hold.agent, account.address)) return failed(`call ${callId} was paid by ${hold.agent}, not by this wallet`)
           const receipt = await reclaim(wallet, client, escrow, callId as Hex)
           log(`reclaimed ${callId} (tx ${receipt.transactionHash})`)
+          refunded(callId)
           return { content: [text(`Refunded: call ${callId} returned ${Number(hold.amount) / 1e6} pathUSD to ${account.address} (claimTimeout tx ${receipt.transactionHash}).`)] }
         }
         return failed(`no hold for call ${callId} in ${cfg.escrows.join(', ')}`)
@@ -272,6 +299,7 @@ export function createBridge(cfg: BridgeConfig) {
       )) as CallToolResult & { receipt?: { reference?: string } }
       const call = (result._meta?.['org.fermata/call'] ?? undefined) as { callId: string; status: string } | undefined
       if (call) log(`${name}: call ${call.callId.slice(0, 10)} ${call.status}`)
+      if (call?.status === 'refunded') refunded(call.callId)
       const { receipt: _receipt, ...rest } = result
       // An error result without a Fermata call record: the gateway will not settle a hold it doesn't know.
       if (result.isError && !call && paid.holds.length) {

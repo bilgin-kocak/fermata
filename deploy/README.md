@@ -85,6 +85,23 @@ internet ──443──▶ Caddy (TLS) ──▶ gateway 127.0.0.1:4300 ──�
   - onboarding: 20 checks per hour and 3 registrations per day per address, 20 registrations a day in total.
 - Onboarding only fetches public HTTPS hosts on port 443. Private, loopback, link-local and metadata addresses are refused.
 
+## A notary run elsewhere
+
+The notary can run on another machine, ideally another operator's ([`deploy/notary/`](notary/README.md)).
+The operator sends you its address, public key and access token. Set these and redeploy:
+
+```sh
+REMOTE_NOTARY_ADDR=host:7347
+REMOTE_NOTARY_PUBLIC_KEY=0x02…            # printed by the notary at start
+REMOTE_NOTARY_TOKEN=…
+REMOTE_NOTARY_LABEL="independent: Example Labs"   # shown with the scores: name who actually runs it
+```
+
+At start the stack registers the demo services again (label suffix `2`) bound to that notary's key.
+The old services stay served and scored, marked legacy, and their tool names and Try-it buttons move
+to the new ones. Keep the notary close to the gateway (the same region): each proven call moves about
+66 MB between the two.
+
 ## If something is wrong
 
 - **The gateway doesn't come up:** `journalctl -u fermata -n 200`. Usually it's a key with no funds (`pnpm fund`), or the Moderato RPC being unreachable.

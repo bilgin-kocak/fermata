@@ -34,13 +34,15 @@ Before any money moves, `fermata-mcp` checks, in the SDK's `fermata()` client:
 
 It also runs a spending guard: a per-call cap (`FERMATA_MAX_PRICE`), a per-session budget
 (`FERMATA_BUDGET`) and a longest settlement window (`FERMATA_MAX_WINDOW`). A declined payment comes
-back as a tool error, and no hold is made. If a paid call fails after the money is held (it gives up
+back as a tool error, and no hold is made. A payment refunded on a proven failure, or reclaimed with
+`fermata_reclaim`, goes back into the budget; one awaiting its timeout refund stays counted until it
+is reclaimed. `fermata_wallet` shows what was held, what came back, and what is left. If a paid call fails after the money is held (it gives up
 after 3 minutes), the error names the call: `fermata_call` shows its state, and `fermata_reclaim`
 refunds it once its settlement window has passed.
 
-The automatic wallet pays one call at a time within one `fermata-mcp` process. Two sessions running
-at once share it and can collide on its nonces (the payment fails; nothing is lost): give each
-session its own `FERMATA_AGENT_KEY` if you run several.
+Sessions paying from the same wallet send their holds one at a time (a lock file in
+`~/.fermata/locks/`), and a hold that loses its nonce to another sender is sent again, up to three
+times. Give each session its own `FERMATA_AGENT_KEY` if you want them to pay in parallel.
 
 ## Use it from Claude Code
 
@@ -136,3 +138,12 @@ fresh funded agent. It checks six things and prints a pass/fail table:
 - the agent paid exactly 0.01 plus gas, because the refund came back.
 
 All 6 PASS on Anvil (2026-10-02).
+
+## Changes
+
+- **0.1.4:**
+  - refunds (proven failures, `fermata_reclaim`) go back into the session budget;
+  - sessions sharing a wallet take turns sending holds, and a hold that loses its nonce is retried;
+  - common errors come back as one sentence with the next step;
+  - first unit tests.
+- **0.1.3:** the version on npm before 0.1.4.

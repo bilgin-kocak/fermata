@@ -737,13 +737,29 @@ describe('money paths (hardening)', () => {
 
   it('public mode rate-limits paid routes and proof re-verification per visitor', async () => {
     gw = await build({}, { GATEWAY_PUBLIC: '1', GATEWAY_RATE_PER_MIN: '2', GATEWAY_VERIFY_RATE_PER_MIN: '1' })
-    const hit = () => gw.app.request(`${BASE}${quote}`)
+    const from = (ip: string) => ({ incoming: { socket: { remoteAddress: ip } } })
+    const hit = (ip = '203.0.113.9') => gw.app.request(`${BASE}${quote}`, {}, from(ip))
     expect((await hit()).status).toBe(402)
     expect((await hit()).status).toBe(402)
     const third = await hit()
     expect(third.status).toBe(429)
     expect(third.headers.get('retry-after')).toBeTruthy()
-    const v = () => gw.app.request(`${BASE}/proofs/0x${'12'.repeat(32)}/verify`, { method: 'POST' })
+    expect((await hit('203.0.113.10')).status).toBe(402) // another visitor is not affected
+    const v = (env?: object) => gw.app.request(`${BASE}/proofs/0x${'12'.repeat(32)}/verify`, { method: 'POST' }, env)
+    expect((await v(from('203.0.113.9'))).status).toBe(404)
+    expect((await v(from('203.0.113.9'))).status).toBe(429)
+    // In-process requests (the MCP endpoint's fermata_verify, the demo agent) are limited where they
+    // enter, not here: otherwise every MCP user would share one bucket.
+    expect((await v()).status).toBe(404)
+    expect((await v()).status).toBe(404)
+    // A local client with no proxy in front is not limited (local development).
+    expect((await v(from('127.0.0.1'))).status).toBe(404)
+    expect((await v(from('127.0.0.1'))).status).toBe(404)
+  })
+
+  it('behind a proxy, a loopback socket is the proxy, so it is still limited', async () => {
+    gw = await build({}, { GATEWAY_PUBLIC: '1', GATEWAY_VERIFY_RATE_PER_MIN: '1', GATEWAY_TRUST_PROXY: '1' })
+    const v = () => gw.app.request(`${BASE}/proofs/0x${'12'.repeat(32)}/verify`, { method: 'POST', headers: { 'x-forwarded-for': '198.51.100.7' } }, { incoming: { socket: { remoteAddress: '127.0.0.1' } } })
     expect((await v()).status).toBe(404)
     expect((await v()).status).toBe(429)
   })
@@ -773,5 +789,43 @@ describe('call store', () => {
     expect(all).toHaveLength(3)
     const two = (await (await gw.app.request(`${BASE}/calls?limit=2`)).json()) as { callId: string }[]
     expect(two.map((c) => c.callId)).toEqual(all.slice(1).map((c) => c.callId))
+  })
+})
+
+describe('notaries and legacy services', () => {
+  it('sends each call to its service\'s notary, and shows who runs it', async () => {
+    gw = await build({ services: [{ ...config().services[0]!, notary: 'notary.example:7347', notaryLabel: 'independent: Example Labs' }] })
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    await agentFetch()(`/s/${sid}/v1/quote?symbol=BTC-USD`)
+    expect(attestor.calls[0]!.notary).toBe('notary.example:7347')
+    const services = (await (await gw.app.request(`${BASE}/services`)).json()) as { notary: unknown; legacy: boolean }[]
+    expect(services[0]).toMatchObject({ notary: { keyHash: `0x${'55'.repeat(32)}`, label: 'independent: Example Labs' }, legacy: false })
+  })
+
+  it('a service without its own notary uses the attestor\'s default (no notary field sent)', async () => {
+    attestor.next = (i) => verdict(i.callId, 1, { status: 200, body: '{}' })
+    await agentFetch()(`/s/${sid}/v1/quote?symbol=BTC-USD`)
+    expect(attestor.calls[0]!.notary).toBeUndefined()
+  })
+
+  it('a legacy service is still served and scored, but is no longer an MCP tool or advertised', async () => {
+    const fresh = makeServiceId(vendor, 'quote2')
+    gw = await build({
+      services: [
+        { ...config().services[0]!, legacy: true, notaryLabel: 'Fermata-run', tool: { name: 'get_quote', path: '/v1/quote?symbol={symbol}' } },
+        { serviceId: fresh, upstream, examplePath: '/v1/quote?symbol=BTC-USD', notary: 'notary.example:7347', notaryLabel: 'independent: Example Labs', tool: { name: 'get_quote', path: '/v1/quote?symbol={symbol}' } },
+      ],
+    })
+    const { tools } = await (await mcpClient(false)).listTools()
+    expect(tools.filter((t) => t.name === 'get_quote')).toHaveLength(1)
+    // The one tool is the new service: its challenge names the new serviceId.
+    const err = (await (await mcpClient(false)).callTool({ name: 'get_quote', arguments: { symbol: 'BTC-USD' } }).catch((e: unknown) => e)) as { data: { challenges: { request: { serviceId: string } }[] } }
+    expect(err.data.challenges[0]!.request.serviceId.toLowerCase()).toBe(fresh.toLowerCase())
+    // Still served over HTTP, for existing clients.
+    expect((await gw.app.request(`${BASE}/s/${sid}/v1/quote?symbol=BTC-USD`)).status).toBe(402)
+    expect(await (await gw.app.request(`${BASE}/llms.txt`)).text()).not.toContain(sid)
+    chain.scoringLogs = [{ eventName: 'ServiceRegistered', blockNumber: 0n, transactionHash: sid, args: { serviceId: sid, owner: vendor, token, payout: vendor, verifier: signer, pricePerCall: 10_000n, settlementWindow: 120 } }]
+    const scores = (await (await gw.app.request(`${BASE}/scores`)).json()) as { scores: Record<string, unknown>[] }
+    expect(scores.scores.find((s) => s.serviceId === sid)).toMatchObject({ legacy: true, tool: null, notary: { label: 'Fermata-run' } })
   })
 })

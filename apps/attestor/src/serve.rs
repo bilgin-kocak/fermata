@@ -42,7 +42,10 @@ pub struct State {
     pub mozilla_roots: bool,
     /// HTTP CONNECT proxy for vendors not pinned with `resolve` (passed to the `prove` child).
     pub upstream_proxy: Option<String>,
+    /// Default notary; a service can name another (`ProveBody.notary`).
     pub notary: String,
+    /// `host:port` → access token, for notaries that require one (passed to the child by env).
+    pub notary_tokens: HashMap<String, String>,
     pub predicates: PredicateStore,
     pub key: [u8; 32],
     pub storage: PathBuf,
@@ -67,6 +70,10 @@ struct ProveBody {
     headers: HashMap<String, String>,
     #[serde(default)]
     body: String,
+    /// This service's notary, `host:port` (default: the attestor's `--notary`). A wrong one cannot
+    /// produce a verdict: the verifier checks the notary key against the service's on-chain hash.
+    #[serde(default)]
+    notary: Option<String>,
 }
 
 fn default_method() -> String {
@@ -134,9 +141,21 @@ impl State {
         let started = std::time::Instant::now();
         let mut last = String::from("no attempt made");
         let mut result = None;
-        for attempt in 1..=self.attempts.max(1) {
+        // One extra attempt, only for an MPC setup stall: it happens before the vendor is contacted, so
+        // trying again cannot reach the vendor twice (public mode otherwise makes a single attempt).
+        let attempts = self.attempts.max(1);
+        for attempt in 1..=attempts + 1 {
+            if attempt > attempts && !last.contains("vendor not contacted") {
+                break;
+            }
+            let notary = body.notary.as_deref().unwrap_or(&self.notary);
             let mut cmd = tokio::process::Command::new(&exe);
-            cmd.arg("prove").args(["--notary", &self.notary]);
+            cmd.arg("prove").args(["--notary", notary]);
+            // The token goes by environment, never on the command line (visible in `ps`).
+            match self.notary_tokens.get(notary) {
+                Some(token) => cmd.env("FERMATA_NOTARY_TOKENS", format!("{notary}={token}")),
+                None => cmd.env_remove("FERMATA_NOTARY_TOKENS"),
+            };
             for ca in &self.ca_paths {
                 cmd.arg("--ca").arg(ca);
             }
@@ -205,16 +224,9 @@ impl State {
                     }
                 }
                 Ok(Ok(out)) => {
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    let line = err
-                        .lines()
-                        .find(|l| l.starts_with("Error:"))
-                        .unwrap_or(err.trim());
                     last = format!(
                         "prove attempt {attempt}: {}",
-                        line.trim_start_matches("Error: ")
-                            .replace("prove attempt 1 ", "")
-                            .replace("prove attempt 1: ", "")
+                        child_error(&String::from_utf8_lossy(&out.stderr))
                     );
                 }
                 Ok(Err(e)) => last = format!("prove attempt {attempt}: {e}"),
@@ -230,10 +242,14 @@ impl State {
         let _ = tokio::fs::remove_file(&body_file).await;
         let Some(out) = result else {
             error!("callId {}: no transcript: {last}", body.call_id);
-            return Err((
-                StatusCode::BAD_GATEWAY,
-                json!({ "error": "no-transcript", "detail": last }),
-            ));
+            // The notary could not be reached: Fermata's side failed, not the vendor's (503, so the
+            // gateway never counts it as the vendor not answering).
+            let status = if is_notary_failure(&last) {
+                StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            return Err((status, json!({ "error": "no-transcript", "detail": last })));
         };
         tokio::fs::rename(&tmp, &path)
             .await
@@ -366,6 +382,61 @@ impl State {
     }
 }
 
+/// A prove failure before the vendor was involved: the notary unreachable or refusing the token, or
+/// the MPC setup stalling (the prover says "vendor not contacted"). Never the vendor's failure.
+fn is_notary_failure(reason: &str) -> bool {
+    reason.contains("connecting to notary")
+        || reason.contains("access token to notary")
+        || reason.contains("vendor not contacted")
+}
+
+/// The reason a `prove` child failed, from its stderr: anyhow prints `Error: <context>` and then the
+/// causes (`Caused by:` / `0: …`), and the context alone ("prove attempt 1") says nothing. Joins the
+/// chain, minus the child's own attempt prefix, into one line.
+fn child_error(stderr: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut in_error = false;
+    for line in stderr.lines() {
+        let l = line.trim();
+        if let Some(head) = l.strip_prefix("Error: ") {
+            in_error = true;
+            parts.push(head.to_string());
+        } else if in_error
+            && !l.is_empty()
+            && l != "Caused by:"
+            && !l.starts_with("Stack backtrace")
+        {
+            let cause = l
+                .split_once(": ")
+                .filter(|(n, _)| n.chars().all(|c| c.is_ascii_digit()))
+                .map(|(_, c)| c)
+                .unwrap_or(l);
+            parts.push(cause.to_string());
+        }
+    }
+    parts.retain(|p| {
+        !(p.starts_with("prove attempt ")
+            && p.trim_start_matches("prove attempt ")
+                .chars()
+                .all(|c| c.is_ascii_digit()))
+    });
+    let joined = parts.join(": ");
+    let joined = joined
+        .strip_prefix("prove attempt 1: ")
+        .unwrap_or(&joined)
+        .to_string();
+    if joined.is_empty() {
+        stderr
+            .trim()
+            .lines()
+            .last()
+            .unwrap_or("no error output")
+            .to_string()
+    } else {
+        joined
+    }
+}
+
 fn internal(e: anyhow::Error) -> (StatusCode, Value) {
     error!("{e:#}");
     (
@@ -411,6 +482,9 @@ async fn route(
             "escrow": hex0x(&state.chain.escrow),
             "chainId": state.chain.chain_id,
             "notary": state.notary,
+            "notaries": std::iter::once(state.notary.clone())
+                .chain(state.notary_tokens.keys().filter(|k| **k != state.notary).cloned())
+                .collect::<Vec<_>>(),
             "predicates": state.predicates.len(),
         })),
         (Method::POST, "/v1/prove") => match parse::<ProveBody>(req).await {
@@ -502,5 +576,40 @@ mod tests {
         assert_eq!((o.port, t.as_str()), (443, "/?x=1"));
         assert_eq!(split_url("https://a.b").unwrap().1, "/");
         assert!(split_url("http://a.b/").is_err());
+    }
+
+    #[test]
+    fn a_failed_prove_child_reports_its_cause_not_just_its_attempt() {
+        let stderr = "Error: prove attempt 1\n\nCaused by:\n    0: connecting to notary 10.0.0.5:7347\n    1: Connection refused (os error 111)\n";
+        assert_eq!(
+            child_error(stderr),
+            "connecting to notary 10.0.0.5:7347: Connection refused (os error 111)"
+        );
+        let one_line = "Error: sending the access token to notary 1.2.3.4:7347: Broken pipe\n";
+        assert_eq!(
+            child_error(one_line),
+            "sending the access token to notary 1.2.3.4:7347: Broken pipe"
+        );
+        assert_eq!(
+            child_error("thread panicked at boom\n"),
+            "thread panicked at boom"
+        );
+    }
+
+    #[test]
+    fn a_notary_outage_is_not_blamed_on_the_vendor() {
+        assert!(is_notary_failure(
+            "prove attempt 1: connecting to notary 10.0.0.5:7347: Connection refused (os error 111)"
+        ));
+        assert!(is_notary_failure(
+            "prove attempt 1: sending the access token to notary 1.2.3.4:7347: Broken pipe"
+        ));
+        assert!(!is_notary_failure(
+            "prove attempt 1: connecting to vendor vendor.fermata.test:443: Connection refused"
+        ));
+        assert!(is_notary_failure(
+            "prove attempt 1: MPC setup stalled for 3.3s (vendor not contacted)"
+        ));
+        assert!(!is_notary_failure("prove attempt 1: no result after 10s"));
     }
 }

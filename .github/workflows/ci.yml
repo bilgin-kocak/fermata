@@ -30,6 +30,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm sdk:test
       - run: pnpm gateway:test
+      - run: pnpm -F fermata-mcp test
       - name: Build the npm packages and the dashboard
         run: pnpm -F fermata-sdk build && pnpm -F fermata-mcp build && pnpm -F @fermata/dashboard build
 

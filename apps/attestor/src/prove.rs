@@ -62,6 +62,8 @@ pub const USER_AGENT: &str = "fermata-attest/0.1 (+https://github.com/bilgin-koc
 pub struct ProveRequest {
     /// Notary TCP address, `host:port`.
     pub notary: String,
+    /// Access token for that notary, when it requires one.
+    pub notary_token: Option<String>,
     /// Vendor TCP address to dial, `host:port` (lets `vendor.fermata.test` resolve to 127.0.0.1).
     pub connect: String,
     /// Registered origin; gives the TLS server name and the `Host` header.
@@ -233,10 +235,15 @@ impl<T> Drop for AbortOnDrop<T> {
 pub async fn prove_once(req: &ProveRequest) -> Result<ProveOutput> {
     let server_name = ServerName::Dns(req.origin.host.as_str().try_into()?);
 
-    let notary_socket = TcpStream::connect(&req.notary)
+    let mut notary_socket = TcpStream::connect(&req.notary)
         .await
         .with_context(|| format!("connecting to notary {}", req.notary))?;
     notary_socket.set_nodelay(true)?;
+    if let Some(token) = &req.notary_token {
+        crate::notary::send_token(&mut notary_socket, token)
+            .await
+            .with_context(|| format!("sending the access token to notary {}", req.notary))?;
+    }
     let (bytes_read, bytes_written) = (std::sync::Arc::default(), std::sync::Arc::default());
     let counted = Counting {
         inner: notary_socket,

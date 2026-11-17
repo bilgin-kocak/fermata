@@ -32,7 +32,7 @@ await mcp.connect(
       TEMPO_RPC_URL: stack.rpc,
       FERMATA_ESCROW: stack.escrow,
       FERMATA_TRUSTED_VERIFIERS: stack.verifier,
-      FERMATA_BUDGET: '20000', // two calls; the third is declined by the spending guard
+      FERMATA_BUDGET: '20000', // two calls held at a time: the refund of the broken call frees room for a third; a fourth is declined
     },
     stderr: 'inherit',
   }),
@@ -60,15 +60,17 @@ const verify = await call('fermata_verify', { callId: okId })
 console.log(`\n▶ fermata_verify { callId: ${okId?.slice(0, 10)}… }\n  ok: ${verify.structuredContent?.ok}  ${(verify.structuredContent?.checks ?? []).map((c: { name: string; ok: boolean }) => `${c.ok ? '✓' : '✗'} ${c.name}`).join('  ')}`)
 const recon = await call('fermata_reconcile', { callId: badId })
 console.log(`\n▶ fermata_reconcile { callId: ${badId?.slice(0, 10)}… }\n  ${recon.structuredContent?.expected} → match: ${recon.structuredContent?.match}`)
-const over = await call('get_quote_reliable', { symbol: 'SOL-USD' })
-show('get_quote_reliable { symbol: "SOL-USD" }  — over the session budget', over)
+const again = await call('get_quote_reliable', { symbol: 'SOL-USD' })
+show('get_quote_reliable { symbol: "SOL-USD" }  — paid from the refunded budget', again)
+const over = await call('get_quote_reliable', { symbol: 'ADA-USD' })
+show('get_quote_reliable { symbol: "ADA-USD" }  — over the session budget', over)
 const wallet1 = await call('fermata_wallet')
 show('fermata_wallet', wallet1)
 await mcp.close()
 
 const spent = Math.round((wallet0.structuredContent!.pathUSD - wallet1.structuredContent!.pathUSD) * 1e6)
 let gas = 0n
-for (const r of [ok, bad]) {
+for (const r of [ok, bad, again]) {
   const holdTx = r._meta?.['org.fermata/call']?.holdTx?.split('/').pop() as Hex | undefined
   if (holdTx) gas += feesPaid(await client.getTransactionReceipt({ hash: holdTx })).reduce((s, f) => s + f.amount, 0n)
 }
@@ -77,9 +79,10 @@ const checks: [string, boolean][] = [
   ['paid tool refunded on a proven 500', bad._meta?.['org.fermata/call']?.status === 'refunded' && !!bad.isError],
   ['proof re-verified offline against the chain', verify.structuredContent?.ok === true],
   ['refund reconciled by memo = callId', recon.structuredContent?.match === true],
+  ['a refund goes back into the budget: the next call is paid', again._meta?.['org.fermata/call']?.status === 'released' && wallet1.structuredContent?.refundedThisSession === 0.01],
   ['spending guard declines a call over budget', !!over.isError && !over._meta],
-  ['agent paid one call (10000) + gas, the refund came back', BigInt(spent) - gas === 10_000n],
+  ['agent paid two calls (20000) + gas, the refund came back', BigInt(spent) - gas === 20_000n],
 ]
 console.log(`\n${table(['check', 'result'], checks.map(([k, v]) => [k, v ? 'PASS' : 'FAIL']))}`)
-console.log(`\nagent spent ${spent / 1e6} pathUSD = 0.01 for the released call + ${Number(gas) / 1e6} gas for two holds; the refunded call cost only gas`)
+console.log(`\nagent spent ${spent / 1e6} pathUSD = 0.02 for the two released calls + ${Number(gas) / 1e6} gas for three holds; the refunded call cost only gas`)
 process.exit(checks.every(([, v]) => v) ? 0 : 1)

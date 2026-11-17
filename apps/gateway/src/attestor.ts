@@ -1,6 +1,6 @@
 import type { Hex } from 'viem'
 
-export type AttestInput = { callId: Hex; url: string; method: string; headers: Record<string, string>; body: string }
+export type AttestInput = { callId: Hex; url: string; method: string; headers: Record<string, string>; body: string; notary?: string }
 
 export type ProvedResponse = {
   status: number | null

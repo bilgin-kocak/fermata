@@ -23,7 +23,7 @@ export type ToolConfig = {
   path: string
 }
 
-type McpService = { serviceId: Hex; price: bigint; token: Hex; window: number; summary?: string; tool?: ToolConfig; onboarded?: boolean }
+type McpService = { serviceId: Hex; price: bigint; token: Hex; window: number; summary?: string; tool?: ToolConfig; onboarded?: boolean; legacy?: boolean }
 
 /** Names a service may not take: the free tools, and the namespace they live in. */
 export const isReservedToolName = (name: string) => name.startsWith('fermata_')
@@ -112,6 +112,7 @@ export function mcpHandler(deps: McpDeps) {
   const toolMap = () => {
     const tools = new Map<string, McpService>()
     for (const svc of deps.services.values()) {
+      if (svc.legacy) continue // still served at /s/<serviceId>, no longer offered as a tool
       const name = toolFor(svc).name
       const current = tools.get(name)
       if (!isReservedToolName(name) && (!current || (current.onboarded && !svc.onboarded))) tools.set(name, svc)
@@ -147,7 +148,7 @@ export function mcpHandler(deps: McpDeps) {
   async function freeTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     if (name === 'fermata_vendor_scores') {
       const res = await deps.app.request('/scores')
-      type Row = { label: string | null; tool: string | null; released: number; deliveryRate: number | null; score: number; vendorFailures: number; unclassified: number; clientErrors: number; timeouts: number; distinctAgents: number; fewCalls: boolean; accepted: number; noAnswer: number; oftenNoAnswer: boolean }
+      type Row = { label: string | null; tool: string | null; released: number; deliveryRate: number | null; score: number; vendorFailures: number; unclassified: number; clientErrors: number; timeouts: number; distinctAgents: number; fewCalls: boolean; accepted: number; noAnswer: number; oftenNoAnswer: boolean; notary: { label: string | null; keyHash: string } | null; legacy: boolean }
       const body = (await res.json()) as { scores: Row[] }
       const lines = body.scores.map((s) => {
         const ranked = s.released + s.vendorFailures + s.unclassified
@@ -157,6 +158,8 @@ export function mcpHandler(deps: McpDeps) {
           `${s.clientErrors} client errors (4xx, not counted)`,
           `no answer ${s.noAnswer}/${s.accepted}${s.oftenNoAnswer ? ' (often no answer)' : ''}`,
           `${s.timeouts} timeouts, ${s.distinctAgents} agents${s.fewCalls ? ', few calls' : ''}`,
+          ...(s.notary ? [`notary ${s.notary.label ?? s.notary.keyHash.slice(0, 10)}`] : []),
+          ...(s.legacy ? ['legacy (no longer offered)'] : []),
         ].join(', ')
       })
       return { content: [text(lines.join('\n') || 'no calls yet')], structuredContent: body as unknown as Record<string, unknown>, isError: !res.ok }
