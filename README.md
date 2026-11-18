@@ -6,7 +6,7 @@
 
 **Live demo (Tempo Moderato testnet, no wallet needed):** [fermata-production-9378.up.railway.app/dashboard](https://fermata-production-9378.up.railway.app/dashboard/). Use Try it, the Vendors scoreboard, List your API, and Use it (pay on proof from your own agent).
 
-**Use it from Claude:** `claude mcp add fermata -- npx -y fermata-mcp` (testnet; it creates and funds its own wallet) · TypeScript: `npm install fermata-sdk` · [more](#use-it-in-your-project).
+**Use it from Claude:** `claude mcp add fermata -- npx -y fermata-mcp` (testnet; it creates and funds its own wallet) · TypeScript: `npm install fermata-sdk mppx@~0.11.0 viem@~2.56.0` · [more](#use-it-in-your-project).
 
 **Videos:** [pitch (≈ 3 min)](https://www.loom.com/share/35084c15407244d8b9e91c1d69b220b3) · [product demo](https://www.loom.com/share/8345dee5fb024d7a9e98e45f310b1bc9).
 
@@ -378,7 +378,7 @@ Two npm packages, MIT licensed, for Tempo Moderato testnet:
 | Package | For | Start |
 |---|---|---|
 | [`fermata-mcp`](https://www.npmjs.com/package/fermata-mcp) ([docs](apps/mcp/README.md)) | Claude Code, Claude Desktop, any MCP client | `claude mcp add fermata -- npx -y fermata-mcp` |
-| [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk) ([docs](packages/sdk/README.md)) | TypeScript agents and servers on [mppx](https://github.com/wevm/mppx) | `npm install fermata-sdk mppx@~0.11.0 viem` |
+| [`fermata-sdk`](https://www.npmjs.com/package/fermata-sdk) ([docs](packages/sdk/README.md)) | TypeScript agents and servers on [mppx](https://github.com/wevm/mppx) | `npm install fermata-sdk mppx@~0.11.0 viem@~2.56.0` |
 
 With no settings, `fermata-mcp` pays the live demo's tools from a testnet wallet it creates in
 `~/.fermata/agent-key` and funds from Tempo's testnet faucet. `fermata-sdk` adds the `fermata`
@@ -460,8 +460,22 @@ upgrade of Moderato (2026-10-08) the live demo was re-tested: release, proven-fa
 timeout refund, offline re-verification and `npx -y fermata-mcp` all pass (FACTS §15.9). Nothing is
 faked; see [`docs/PLAN.md`](docs/PLAN.md).
 
-**Freeze:** the demo, the video and this README are frozen from **2026-10-09** (72 h before the
-2026-10-12 deadline). After the freeze, only bug fixes that a failing `pnpm demo:cases` justifies.
+**Submitted version:** tagged [`submission-2026-10-12`](https://github.com/bilgin-kocak/fermata/tree/submission-2026-10-12)
+(`d7cc642`, the last commit before the 2026-10-12 deadline). The demo, the videos and this README
+were frozen from 2026-10-09 until the deadline. The live demo still runs the submitted code.
+
+**Since the deadline** (in the repository, not yet on the live demo):
+- **2026-11-16, [#10](https://github.com/bilgin-kocak/fermata/pull/10):** a code review's fixes to
+  the money paths (a free answer near the deadline, a verdict lost on restart, replay after restart)
+  and the public demo (caps and rate limits), with a regression test for each; CI.
+- **2026-11-17, [#11](https://github.com/bilgin-kocak/fermata/pull/11):** vendor scores rank a vendor
+  on its own failures only (a proven 4xx is the agent's error; hangs show as a no-answer rate);
+  three more real APIs on the demo.
+- **2026-11-17, [#12](https://github.com/bilgin-kocak/fermata/pull/12):** the notary can run on
+  another operator's host with its own key ([`deploy/notary/`](deploy/notary/README.md));
+  `fermata-mcp` 0.1.4 (refunds go back into the budget; sessions can share one wallet).
+- **2026-11-18:** `fermata-sdk` 0.1.2 caps its `viem` peer below 2.57.16, the first viem that
+  requires mppx ≥ 0.17; the install command pins `viem@~2.56.0`.
 
 More: [`docs/FACTS.md`](docs/FACTS.md) (verified facts about Tempo, MPP and TLSNotary, with
 sources and measurements) · [`docs/PLAN.md`](docs/PLAN.md) (milestones, decisions, risks) ·

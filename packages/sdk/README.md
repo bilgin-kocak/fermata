@@ -14,7 +14,7 @@ memo and vendor scores.
 > Project, trust model and live demo: <https://github.com/bilgin-kocak/fermata>.
 
 ```sh
-npm install fermata-sdk mppx@~0.11.0 viem
+npm install fermata-sdk mppx@~0.11.0 viem@~2.56.0
 ```
 
 ## Agents: pay on proof
@@ -137,5 +137,7 @@ MIT licensed.
   this much of the hold's settlement window is left (default 15 s, capped at a third of the window).
   `aggregateScores(logs, classify)`: proven failures split into `vendorFailures`, `clientErrors`
   (proven 4xx, not ranked) and `unclassified`; `failureClass` and `provenStatus` helpers; a `Held`
-  event seen twice (overlapping scans) counts once.
+  event seen twice (overlapping scans) counts once. The `viem` peer is capped below 2.57.16: from
+  that version viem asks for mppx ≥ 0.17, which npm can't install next to mppx 0.11 (install with
+  `viem@~2.56.0`, as above).
 - **0.1.1:** first public release.

@@ -785,7 +785,7 @@ console.log(res.status, receipt.outcome, receipt.callId) // 200 DELIVERED 0x…`
             <h3>
               TypeScript agents <a className="mono" href="https://www.npmjs.com/package/fermata-sdk" target="_blank" rel="noreferrer">fermata-sdk</a>
             </h3>
-            <Snippet label="Install" code="npm install fermata-sdk mppx@~0.11.0 viem" />
+            <Snippet label="Install" code="npm install fermata-sdk mppx@~0.11.0 viem@~2.56.0" />
             <p>
               The <span className="mono">fermata</span> payment method for <a href="https://github.com/wevm/mppx" target="_blank" rel="noreferrer">mppx</a>. Before any money
               moves it checks the escrow and the verifier against your lists, the registered price, and your caps (<span className="mono">maxAmount</span>,{' '}
