@@ -474,8 +474,9 @@ were frozen from 2026-10-09 until the deadline. The live demo still runs the sub
 - **2026-11-17, [#12](https://github.com/bilgin-kocak/fermata/pull/12):** the notary can run on
   another operator's host with its own key ([`deploy/notary/`](deploy/notary/README.md));
   `fermata-mcp` 0.1.4 (refunds go back into the budget; sessions can share one wallet).
-- **2026-11-18:** `fermata-sdk` 0.1.2 caps its `viem` peer below 2.57.16, the first viem that
-  requires mppx ≥ 0.17; the install command pins `viem@~2.56.0`.
+- **2026-11-18:** `fermata-sdk` 0.1.2 and `fermata-mcp` 0.1.4 published on npm. The SDK caps its
+  `viem` peer below 2.57.16, the first viem that requires mppx ≥ 0.17; the install command pins
+  `viem@~2.56.0`.
 
 More: [`docs/FACTS.md`](docs/FACTS.md) (verified facts about Tempo, MPP and TLSNotary, with
 sources and measurements) · [`docs/PLAN.md`](docs/PLAN.md) (milestones, decisions, risks) ·
