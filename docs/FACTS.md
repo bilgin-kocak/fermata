@@ -653,3 +653,23 @@ Started with `PUBLIC=1 REAL_VENDORS=npm,coinbase,mempool,kraken REMOTE_NOTARY_AD
 Not measured here:
 - **Proving across a real network.** The stand-in ran on the same machine, so prove times (about 1.1–1.7 s) are the localhost baseline. Numbers with the notary on another host go here after Bilgin's deploy.
 - **The kit's Docker image.** This environment has no Docker daemon. The image's Rust stage is the same as the main Dockerfile's; its entrypoint is what ran the stand-in above.
+
+### 15.13 The demo CA across rebuilds (2026-11-18, the live demo on Moderato)
+
+A mock vendor's proof re-verifies offline only against the demo CA in use when it was made. Until
+today the Docker image ran `gen-certs.sh` at build time, so every Railway build had its own CA: after
+each rebuild, `/ca.pem` and the attestor trusted only the new one. Found after redeploying PRs #10–#12:
+`pnpm reverify` on an older mock-vendor call failed with `server certificate verification failed:
+failed to verify certificate path to provided trust anchors`, while every on-chain check passed.
+
+| Check | Result |
+|---|---|
+| Live demo before the fix, 155 older mock-vendor proofs (7 builds, 2026-10-05 to 2026-11-16) | none re-verify against the new CA; with the 2026-10-08 build's CA, exactly the 10 made on that build do: each build had its own CA |
+| CAs recovered (certificates only) | 5 builds: redeploying the old images on Railway with `usePreviousImageTag` (one by rollback); the 2026-10-05 18:14 build predates `/ca.pem`, so its file was read in the container. In [`deploy/demo-cas/`](../deploy/demo-cas/README.md) |
+| Not recovered | 3 short-lived builds of 2026-10-05 (6 proofs): they predate `/ca.pem` |
+| After the fix (deployment `ab58d5bd`) | the CA is made once in `/data/state/certs` (825 days); a container restart reused it (`26B2047ACB97AA57`); `/ca.pem` serves 6 CAs (current + 5 recovered) |
+| Every mock-vendor proof on the live demo, re-verified against the live `/ca.pem` only | **153 / 159**: the 100-call run 105/105, the other recovered builds 46/46, the 4 made since today 4/4; the 6 failures are the unrecovered builds |
+| `deploy/smoke.sh` on the fixed deploy | 10/10 |
+
+Same names, several anchors: two of today's proofs verify with a bundle whose first CA has the same
+subject (`CN = Fermata Dev CA`) but is the wrong one, and fail with that CA alone.

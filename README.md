@@ -462,9 +462,10 @@ faked; see [`docs/PLAN.md`](docs/PLAN.md).
 
 **Submitted version:** tagged [`submission-2026-10-12`](https://github.com/bilgin-kocak/fermata/tree/submission-2026-10-12)
 (`d7cc642`, the last commit before the 2026-10-12 deadline). The demo, the videos and this README
-were frozen from 2026-10-09 until the deadline. The live demo still runs the submitted code.
+were frozen from 2026-10-09 until the deadline. The live demo ran the submitted code until
+2026-11-18.
 
-**Since the deadline** (in the repository, not yet on the live demo):
+**Since the deadline** (on the live demo since 2026-11-18, except the remote notary, which is not in use):
 - **2026-11-16, [#10](https://github.com/bilgin-kocak/fermata/pull/10):** a code review's fixes to
   the money paths (a free answer near the deadline, a verdict lost on restart, replay after restart)
   and the public demo (caps and rate limits), with a regression test for each; CI.
@@ -474,6 +475,12 @@ were frozen from 2026-10-09 until the deadline. The live demo still runs the sub
 - **2026-11-17, [#12](https://github.com/bilgin-kocak/fermata/pull/12):** the notary can run on
   another operator's host with its own key ([`deploy/notary/`](deploy/notary/README.md));
   `fermata-mcp` 0.1.4 (refunds go back into the budget; sessions can share one wallet).
+- **2026-11-18, the demo CA:** a mock vendor's proof re-verifies only against the demo CA in use when
+  it was made, and every image build had made a new one, so each rebuild of the live demo had left
+  the older proofs unverifiable offline. The CA now lives on the volume, and the demo trusts every CA
+  it used, recovered from the old images into [`deploy/demo-cas/`](deploy/demo-cas/README.md): 153 of
+  the live demo's 159 mock-vendor proofs re-verify against its `/ca.pem`, the 100-call run included
+  (FACTS §15.13).
 - **2026-11-18:** `fermata-sdk` 0.1.2 and `fermata-mcp` 0.1.4 published on npm. The SDK caps its
   `viem` peer below 2.57.16, the first viem that requires mppx ≥ 0.17; the install command pins
   `viem@~2.56.0`.
