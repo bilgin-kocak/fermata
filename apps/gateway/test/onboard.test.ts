@@ -157,3 +157,69 @@ describe('onboarding routes', () => {
     expect(s.registered).toHaveLength(1)
   })
 })
+
+describe('listing ownership', () => {
+  const payout = '0x00000000000000000000000000000000000000a9'
+  const proven = { verified: true, method: 'dns' as const, checkedAt: '2026-11-18T10:00:00.000Z', detail: 'TXT _fermata.registry.npmjs.org names it' }
+  const unproven = { verified: false, checkedAt: '2026-11-18T10:00:00.000Z', detail: 'no TXT record; no well-known file' }
+  function setup(over: Partial<OnboardDeps> = {}) {
+    const registered: RegisterInput[] = []
+    const asked: [string, string][] = []
+    const app = new Hono()
+    onboardRoutes(app, {
+      resolve: resolver({ 'registry.npmjs.org': ['104.16.0.34'], 'evil.example.com': ['10.0.0.5'] }),
+      probe: async () => sample(),
+      register: async (i) => (registered.push(i), { serviceId: `0x${'aa'.repeat(32)}`, txHash: `0x${'bb'.repeat(32)}`, endpoint: '/s/0xaa/x', tool: i.toolName }),
+      checkOwner: async (host, p) => (asked.push([host, p]), proven),
+      trustProxy: true,
+      ...over,
+    })
+    const post = (route: string, body: unknown, ip = '203.0.113.9') =>
+      app.request(route, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': ip }, body: JSON.stringify(body) })
+    return { post, registered, asked }
+  }
+  const listing = { url: 'https://registry.npmjs.org/-/package/mppx/dist-tags', label: 'npm-own', payout, price: '0.02', predicate: draftPredicate(sample()) }
+
+  it('owner-check tells the lister what to publish, for that exact host and payout', async () => {
+    const s = setup({ checkOwner: async () => unproven })
+    const res = await s.post('/onboard/owner-check', { url: listing.url, payout })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      verified: false, host: 'registry.npmjs.org', required: false,
+      instructions: { dns: { name: '_fermata.registry.npmjs.org', value: `fermata-payout=${payout}` }, wellKnown: { url: 'https://registry.npmjs.org/.well-known/fermata.json' } },
+    })
+  })
+
+  it('owner-check refuses a private target and a bad payout before any lookup', async () => {
+    const s = setup()
+    expect((await s.post('/onboard/owner-check', { url: 'https://evil.example.com/', payout })).status).toBe(400)
+    expect((await s.post('/onboard/owner-check', { url: listing.url, payout: 'nope' })).status).toBe(400)
+    expect(s.asked).toEqual([])
+  })
+
+  it('register checks ownership on the server, for the payout being registered, and stores the result', async () => {
+    const s = setup()
+    const res = await s.post('/onboard/register', listing)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, owner: { verified: true, method: 'dns' } })
+    expect(s.asked).toEqual([['registry.npmjs.org', payout]])
+    expect(s.registered[0]!.owner).toEqual(proven)
+  })
+
+  it('an unverified listing is allowed by default, and stored as unverified', async () => {
+    const s = setup({ checkOwner: async () => unproven })
+    expect((await s.post('/onboard/register', listing)).status).toBe(200)
+    expect(s.registered[0]!.owner).toEqual(unproven)
+  })
+
+  it('with requireOwnerProof, an unverified listing is refused (403) before any registration quota is spent', async () => {
+    const s = setup({ checkOwner: async () => unproven, requireOwnerProof: true, perIpRegistrationsPerDay: 1 })
+    const res = await s.post('/onboard/register', listing)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ instructions: { dns: { name: '_fermata.registry.npmjs.org' } } })
+    expect(s.registered).toEqual([])
+    // The quota is intact: the same address can list once proven.
+    const ok = setup({ requireOwnerProof: true, perIpRegistrationsPerDay: 1 })
+    expect((await ok.post('/onboard/register', listing)).status).toBe(200)
+  })
+})

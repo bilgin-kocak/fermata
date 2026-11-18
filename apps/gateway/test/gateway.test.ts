@@ -829,3 +829,57 @@ describe('notaries and legacy services', () => {
     expect(scores.scores.find((s) => s.serviceId === sid)).toMatchObject({ legacy: true, tool: null, notary: { label: 'Fermata-run' } })
   })
 })
+
+describe('listing ownership in the gateway', () => {
+  async function withOwnerCheck(check: (host: string, payout: Address) => Promise<import('../src/owner.ts').OwnerProof>) {
+    const { writeFileSync } = await import('node:fs')
+    const cfgPath = path.join(mkdtempSync(path.join(tmpdir(), 'fermata-cfg-')), 'gateway.config.json')
+    writeFileSync(cfgPath, JSON.stringify({ escrow, services: config().services }))
+    store = new CallStore(mkdtempSync(path.join(tmpdir(), 'fermata-gw-')))
+    chain.origin = originHash('https://registry.npmjs.org')
+    gw = await createGateway({
+      config: { ...config({ services: [] }), storageDir: store.dir }, chain, publicClient: chain.publicClient(), attestor, store,
+      secretKey: 'unit-test-secret-key-at-least-32-bytes!!', env: {}, log: () => {}, configPath: cfgPath,
+      onboard: { probe: async () => ({}) as never, register: async () => ({}) as never, checkOwner: check },
+    })
+    return cfgPath
+  }
+  const fresh = (ago: number) => new Date(Date.now() - ago).toISOString()
+
+  it('labels who listed each service and whether the owner is verified, in /services and over MCP', async () => {
+    await withOwnerCheck(async () => ({ verified: true, method: 'dns', checkedAt: fresh(0), detail: '' }))
+    const verified = makeServiceId(vendor, 'npm-a')
+    const unverified = makeServiceId(vendor, 'npm-b')
+    await gw.addService({ serviceId: verified, upstream: 'https://registry.npmjs.org', tool: { name: 'npm_a', path: '/{p}' }, owner: { verified: true, method: 'dns', checkedAt: fresh(0), detail: 'ok' } })
+    await gw.addService({ serviceId: unverified, upstream: 'https://registry.npmjs.org', tool: { name: 'npm_b', path: '/{p}' }, owner: { verified: false, checkedAt: fresh(0), detail: 'none' } })
+    const services = (await (await gw.app.request(`${BASE}/services`)).json()) as { serviceId: string; listing: Record<string, unknown> }[]
+    expect(services.find((s) => s.serviceId === verified)!.listing).toMatchObject({ by: 'lister', ownerVerified: true, method: 'dns' })
+    expect(services.find((s) => s.serviceId === unverified)!.listing).toMatchObject({ by: 'lister', ownerVerified: false })
+    const { tools } = await (await mcpClient(false)).listTools()
+    expect(tools.find((t) => t.name === 'npm_a')!.description).toContain('proved control of its host (DNS TXT record)')
+    expect(tools.find((t) => t.name === 'npm_b')!.description).toContain('has NOT proved it controls this API')
+  })
+
+  it('a configured (operator-listed) service is labelled as listed by the operator', async () => {
+    const services = (await (await gw.app.request(`${BASE}/services`)).json()) as { listing: unknown }[]
+    expect(services[0]!.listing).toEqual({ by: 'operator' })
+  })
+
+  it('re-checks verified listings once a day: a proof that is gone turns the label, and is persisted', async () => {
+    let proofStillThere = true
+    const cfgPath = await withOwnerCheck(async () =>
+      proofStillThere ? { verified: true, method: 'well-known', checkedAt: fresh(0), detail: 'ok' } : { verified: false, checkedAt: fresh(0), detail: 'HTTP 404' },
+    )
+    const listed = makeServiceId(vendor, 'npm-c')
+    await gw.addService({ serviceId: listed, upstream: 'https://registry.npmjs.org', tool: { name: 'npm_c', path: '/{p}' }, owner: { verified: true, method: 'well-known', checkedAt: fresh(2 * 86_400_000), detail: 'ok' } })
+    expect(await gw.recheckOwners()).toBe(0) // still there: re-dated, still verified
+    proofStillThere = false
+    expect(await gw.recheckOwners()).toBe(0) // checked less than a day ago: not re-checked yet
+    expect(await gw.recheckOwners(0)).toBe(1)
+    const s = ((await (await gw.app.request(`${BASE}/services`)).json()) as { serviceId: string; listing: Record<string, unknown> }[]).find((x) => x.serviceId === listed)!
+    expect(s.listing).toMatchObject({ ownerVerified: false, detail: expect.stringContaining('the .well-known file proof is gone') })
+    const { readFileSync } = await import('node:fs')
+    const persisted = (JSON.parse(readFileSync(cfgPath, 'utf8')) as { services: { serviceId: string; owner?: { verified: boolean } }[] }).services.find((x) => x.serviceId === listed)
+    expect(persisted?.owner?.verified).toBe(false)
+  })
+})

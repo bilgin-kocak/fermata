@@ -28,6 +28,8 @@ export type ServiceConfig = {
   notaryLabel?: string
   /** Still served (existing clients), shown on the scoreboard, but not offered as an MCP tool or Try-it button. */
   legacy?: boolean
+  /** Self-serve listings: whether the lister proved control of the API's host (DNS TXT or .well-known), and when. */
+  owner?: import('./owner.ts').OwnerProof
 }
 
 export type GatewayConfig = {

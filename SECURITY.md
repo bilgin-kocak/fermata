@@ -48,6 +48,11 @@ SDK (regression tests in `apps/gateway/test` and `packages/sdk/test`):
 - **Rate limits shared by everyone using MCP.** In-process requests (the MCP endpoint's
   `fermata_verify`, the demo agent) had no client address, so every MCP user shared one bucket of
   proof re-verifications. They are now limited where they enter (`/mcp`, `/demo/call`).
+- **Listings were not ownership-checked.** Anyone could list any public API under their own payout.
+  A lister can now prove control of the API's host for that exact payout (a DNS TXT record at
+  `_fermata.<host>` or `/.well-known/fermata.json`). The gateway checks it at registration and daily,
+  and the listing is labelled "owner verified" or "owner not verified" wherever it appears.
+  `ONBOARD_REQUIRE_OWNER_PROOF=1` refuses unverified listings.
 - **Score gaming with bad requests.** A proven 4xx (the agent's own bad input) is a client error:
   refunded, shown, never counted against the vendor. Each failure is classified by the HTTP status
   its public proof shows (`pnpm scores --proofs` recomputes it). A vendor that hangs instead of
@@ -63,6 +68,9 @@ Known and not yet fixed:
   body (Kraken does) turns an agent's bad input into a vendor failure: such services should take no
   agent input (the demo's Kraken tool uses a fixed pair). A vendor can still pay itself to inflate its
   score; distinct agents are shown for that reason.
+- **What an ownership proof shows.** Control of the host's DNS or web root when it was checked,
+  re-checked daily: not who wrote the API. Unverified listings are allowed unless the gateway requires
+  a proof; agents see the label in the MCP tool description.
 - **Who runs the notary is a claim.** The scoreboard's "notary: …" name comes from the gateway's
   configuration. What anyone can check is the notary key hash registered on-chain for each service,
   and that every proof is signed by that key. While Fermata runs the notary, Fermata alone could

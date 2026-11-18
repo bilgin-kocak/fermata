@@ -13,6 +13,7 @@ import { createPublicClient, createWalletClient, http, isAddressEqual, type Addr
 import { privateKeyToAccount } from 'viem/accounts'
 import { fermata, fermataEscrowAbi, originHash, predicateHash, serviceId as makeServiceId, tempoChain, tip20Abi, TOKENS } from 'fermata-sdk'
 import { probeVendor } from './onboard.ts'
+import { checkOwner, fetchWellKnown } from './owner.ts'
 import type { ServiceConfig } from './config.ts'
 import { createGateway } from './app.ts'
 import { HttpAttestor } from './attestor.ts'
@@ -99,8 +100,10 @@ function onboardDeps() {
     clientIpHeader: process.env.GATEWAY_CLIENT_IP_HEADER || undefined,
     labelTaken,
     probe: (t: Parameters<typeof probeVendor>[0]) => probeVendor(t, { proxy: process.env.FERMATA_UPSTREAM_PROXY || undefined }),
+    checkOwner: (host: string, payout: Address) => checkOwner(host, payout, { fetchWellKnown: (t) => fetchWellKnown(t, { proxy: process.env.FERMATA_UPSTREAM_PROXY || undefined }) }),
+    requireOwnerProof: process.env.ONBOARD_REQUIRE_OWNER_PROOF === '1',
     register: async (
-      input: { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string },
+      input: { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string; owner?: import('./owner.ts').OwnerProof },
       add: (cfg: ServiceConfig) => Promise<void>,
     ) => {
       const sid = makeServiceId(operator.account.address, input.label)
@@ -125,6 +128,7 @@ function onboardDeps() {
       await add({
         serviceId: sid, upstream: input.origin, examplePath: input.examplePath, summary: input.summary, tool: { name: input.toolName, description: input.summary, path: input.examplePath },
         ...(ref.notary ? { notary: ref.notary } : {}), ...(ref.notaryLabel ? { notaryLabel: ref.notaryLabel } : {}),
+        ...(input.owner ? { owner: input.owner } : {}),
       })
       return { serviceId: sid, txHash, endpoint: `/s/${sid}${input.examplePath}`, tool: input.toolName }
     },
@@ -155,6 +159,11 @@ self = gateway.app
 gateway.warmLogs().catch((e) => console.error(`[gateway] event cache: ${(e as Error).message}`))
 // Proven statuses of refunds recorded before the gateway kept them (classifies 4xx vs vendor failures).
 gateway.backfillStatuses().catch((e) => console.error(`[gateway] status backfill: ${(e as Error).message}`))
+
+// Verified listings' ownership proofs are re-checked once a day (checked hourly for those due).
+setInterval(() => {
+  gateway.recheckOwners().catch((e) => console.error(`[gateway] ownership re-check failed: ${(e as Error).message}`))
+}, 3_600_000).unref()
 
 setInterval(() => {
   gateway.sweep().catch((e) => console.error(`[gateway] sweep failed: ${(e as Error).message}`))

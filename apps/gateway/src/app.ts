@@ -387,7 +387,7 @@ export async function createGateway(deps: GatewayDeps) {
       [...services.values()].map((s) => ({
         serviceId: s.serviceId, endpoint: `/s/${s.serviceId}`, upstream: s.upstream, price: s.price.toString(), token: s.token,
         settlementWindow: s.window, verifier: s.verifier, escrow: chain.escrow, chainId: chain.chainId, unprotectedFallback: s.tempo ?? null,
-        notary: { keyHash: s.notaryKeyHash, label: s.notaryLabel ?? null }, legacy: !!s.legacy,
+        notary: { keyHash: s.notaryKeyHash, label: s.notaryLabel ?? null }, legacy: !!s.legacy, listing: listingOf(s),
       })),
     ),
   )
@@ -439,6 +439,7 @@ export async function createGateway(deps: GatewayDeps) {
         tool: svc && !svc.legacy ? toolFor(svc).name : null,
         legacy: !!svc?.legacy,
         notary: svc ? { keyHash: svc.notaryKeyHash, label: svc.notaryLabel ?? null } : null,
+        listing: svc ? listingOf(svc) : null,
         fewCalls: s.settled < 20,
         accepted: a.accepted,
         noAnswer: a.noAnswer,
@@ -630,19 +631,56 @@ export async function createGateway(deps: GatewayDeps) {
 
   /** Adds a service registered while running (onboarding): the same chain checks as at startup,
    *  then it is served, listed, scored and exposed over MCP at once, and persisted to the config. */
+  /**
+   * Who listed a service: the gateway's operator (configured services, e.g. the demo's), or a lister
+   * through self-serve onboarding, with whether that lister proved control of the API's host.
+   */
+  function listingOf(svc: Service) {
+    if (!svc.onboarded) return { by: 'operator' as const }
+    return { by: 'lister' as const, ownerVerified: !!svc.owner?.verified, method: svc.owner?.method ?? null, checkedAt: svc.owner?.checkedAt ?? null, detail: svc.owner?.detail ?? null }
+  }
+
+  /** Writes one service's config back to the gateway config file (onboarded services live there). */
+  async function persist(serviceId: Hex, update: (cfg: ServiceConfig | undefined) => ServiceConfig) {
+    if (!deps.configPath) return
+    const { existsSync, readFileSync, writeFileSync } = await import('node:fs')
+    const file = (existsSync(deps.configPath) ? JSON.parse(readFileSync(deps.configPath, 'utf8')) : {}) as { services?: ServiceConfig[] }
+    const current = (file.services ?? []).find((s) => s.serviceId.toLowerCase() === serviceId.toLowerCase())
+    file.services = [...(file.services ?? []).filter((s) => s.serviceId.toLowerCase() !== serviceId.toLowerCase()), update(current)]
+    writeFileSync(deps.configPath, `${JSON.stringify(file, null, 2)}\n`)
+  }
+
+  /**
+   * Re-checks the ownership proof of verified self-serve listings older than `maxAgeMs` (a day): a
+   * proof that is gone turns the listing to "owner not verified", with the date. The service stays
+   * served (its terms are on-chain); only its label changes. Returns how many changed.
+   */
+  async function recheckOwners(maxAgeMs = 86_400_000): Promise<number> {
+    const check = deps.onboard?.checkOwner
+    if (!check) return 0
+    let changed = 0
+    for (const svc of services.values()) {
+      if (!svc.onboarded || !svc.owner?.verified || Date.now() - Date.parse(svc.owner.checkedAt) < maxAgeMs) continue
+      const { payout } = await chain.service(svc.serviceId)
+      const owner = await check(new URL(svc.upstream).hostname, payout)
+      const next = owner.verified ? owner : { ...owner, detail: `the ${svc.owner.method === 'dns' ? 'DNS TXT record' : '.well-known file'} proof is gone: ${owner.detail}` }
+      if (!owner.verified) {
+        changed++
+        log(`service ${svc.serviceId.slice(0, 10)}: ownership proof no longer found; labelled "owner not verified"`)
+      }
+      svc.owner = next
+      await persist(svc.serviceId, (cfg) => ({ ...(cfg ?? svc), owner: next }))
+    }
+    return changed
+  }
+
   async function addService(input: ServiceConfig) {
     const cfg = { ...input, onboarded: true }
     const { signer } = await attestor.health()
     // Registered a moment ago: a lagging node may not show it yet. Wait for it, then check it once.
     await eventually(() => deps.chain.service(cfg.serviceId), (s) => !isAddressEqual(s.token, zeroAddress), 6, 1_000).catch(() => undefined)
     services.set(cfg.serviceId.toLowerCase(), await checkService(deps, signer, cfg))
-    if (deps.configPath) {
-      const { readFileSync, writeFileSync } = await import('node:fs')
-      const { existsSync } = await import('node:fs')
-      const file = (existsSync(deps.configPath) ? JSON.parse(readFileSync(deps.configPath, 'utf8')) : {}) as { services?: ServiceConfig[] }
-      file.services = [...(file.services ?? []).filter((s) => s.serviceId.toLowerCase() !== cfg.serviceId.toLowerCase()), cfg]
-      writeFileSync(deps.configPath, `${JSON.stringify(file, null, 2)}\n`)
-    }
+    await persist(cfg.serviceId, () => cfg)
     log(`service ${cfg.serviceId} added (${cfg.upstream})`)
   }
   if (deps.onboard) {
@@ -736,5 +774,5 @@ export async function createGateway(deps: GatewayDeps) {
     return done
   }
 
-  return { app, services, sweep, mppx, addService, warmLogs: refreshLogs, backfillStatuses }
+  return { app, services, sweep, mppx, addService, warmLogs: refreshLogs, backfillStatuses, recheckOwners }
 }

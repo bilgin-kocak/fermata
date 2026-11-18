@@ -7,14 +7,20 @@
 //   4. on confirmation, registers the service on-chain with the operator key, writes the predicate
 //      for the attestor and adds the service to the running gateway.
 //
-//   POST /onboard/probe    {url}                                   → sample + drafted predicate
-//   POST /onboard/register {url, label, payout, price?, predicate} → serviceId, tx, endpoint, MCP tool
+//   POST /onboard/probe       {url}                                   → sample + drafted predicate
+//   POST /onboard/owner-check {url, payout}                           → is the lister in control of the host? (owner.ts)
+//   POST /onboard/register    {url, label, payout, price?, predicate} → serviceId, tx, endpoint, MCP tool
+//
+// Ownership: the register step checks again on the server whether the lister proved control of the
+// API's host for this payout (a DNS TXT record or a .well-known file, owner.ts). Unverified listings
+// are allowed and labelled, unless `requireOwnerProof`.
 import { lookup } from 'node:dns/promises'
 import { isIP, connect as netConnect, type Socket } from 'node:net'
 import { connect as tlsConnect, rootCertificates, type TLSSocket } from 'node:tls'
 import type { Context, Hono } from 'hono'
 import { isAddress, type Address, type Hex } from 'viem'
 import { clientIp, DailyCap, RateLimiter } from './limits.ts'
+import { ownerInstructions, type OwnerProof } from './owner.ts'
 import { isReservedToolName } from './mcp.ts'
 
 // ------------------------------------------------------------------ 1. which URLs may be fetched
@@ -91,7 +97,7 @@ const PROVER_USER_AGENT = 'fermata-attest/0.1 (+https://github.com/bilgin-kocak/
 const PROBE_CALL_ID = `0x${'00'.repeat(32)}`
 
 /** HTTP CONNECT tunnel (when the gateway itself sits behind an egress proxy). */
-async function tunnel(proxyUrl: string, host: string): Promise<Socket> {
+export async function tunnel(proxyUrl: string, host: string): Promise<Socket> {
   const p = new URL(proxyUrl)
   const socket = netConnect({ host: p.hostname, port: Number(p.port || 80) })
   await new Promise<void>((ok, fail) => (socket.once('connect', ok), socket.once('error', fail)))
@@ -109,7 +115,7 @@ async function tunnel(proxyUrl: string, host: string): Promise<Socket> {
   return socket
 }
 
-function decodeChunked(body: Buffer): Buffer {
+export function decodeChunked(body: Buffer): Buffer {
   const out: Buffer[] = []
   let i = 0
   while (i < body.length) {
@@ -262,7 +268,7 @@ export function checkSample(p: Predicate, s: Sample): string[] {
 
 // ------------------------------------------------------------------ 4. routes
 
-export type RegisterInput = { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string }
+export type RegisterInput = { origin: string; examplePath: string; label: string; payout: Address; price: bigint; predicate: Uint8Array; summary: string; toolName: string; owner?: OwnerProof }
 export type Registered = { serviceId: Hex; txHash: Hex; endpoint: string; tool: string }
 
 export type OnboardDeps = {
@@ -274,6 +280,10 @@ export type OnboardDeps = {
   toolTaken?: (name: string) => boolean
   /** True when this label is already registered on-chain (checked before any quota is spent). */
   labelTaken?: (label: string) => Promise<boolean>
+  /** Did the lister prove control of `host` for `payout`? (owner.ts `checkOwner`.) Absent: listings are never verified. */
+  checkOwner?: (host: string, payout: Address) => Promise<OwnerProof>
+  /** Refuse listings without an ownership proof (ONBOARD_REQUIRE_OWNER_PROOF=1). */
+  requireOwnerProof?: boolean
   /** Proxies appending to X-Forwarded-For in front of the gateway (see clientIp). */
   trustProxy?: boolean | number
   clientIpHeader?: string
@@ -290,7 +300,7 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
   const regs = new DailyCap(deps.registrationsPerDay ?? 20, now)
   const ip = (c: Context) =>
     clientIp(c.req.raw.headers, (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress, deps.trustProxy ?? false, deps.clientIpHeader)
-  const bad = (c: Context, e: unknown, status: 400 | 422 = 422) => c.json({ error: (e as Error).message.slice(0, 400) }, status)
+  const bad = (c: Context, e: unknown, status: 400 | 403 | 422 = 422) => c.json({ error: (e as Error).message.slice(0, 400) }, status)
   // Tool names being registered right now: two concurrent listings can't both claim one.
   const claiming = new Set<string>()
 
@@ -311,6 +321,21 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
     } catch (e) {
       return c.json({ ok: false, origin: t.origin, error: (e as Error).message.slice(0, 400) }, 422)
     }
+  })
+
+  app.post('/onboard/owner-check', async (c) => {
+    const { url, payout } = ((await c.req.json().catch(() => ({}))) ?? {}) as { url?: string; payout?: string }
+    if (!payout || !isAddress(payout)) return bad(c, new Error('payout must be an address'), 400)
+    const wait = probes.take(ip(c))
+    if (wait) return c.json({ error: 'too many checks from this address; try again later', retryAfterMs: wait }, 429)
+    let t: SafeTarget
+    try {
+      t = await guardUrl(String(url ?? ''), deps.resolve)
+    } catch (e) {
+      return bad(c, e, 400)
+    }
+    const owner = deps.checkOwner ? await deps.checkOwner(t.host, payout as Address) : { verified: false, checkedAt: new Date(now()).toISOString(), detail: 'ownership checks are not enabled on this gateway' }
+    return c.json({ ...owner, host: t.host, required: !!deps.requireOwnerProof, instructions: ownerInstructions(t.host, payout as Address) })
   })
 
   app.post('/onboard/register', async (c) => {
@@ -349,11 +374,17 @@ export function onboardRoutes(app: Hono, deps: OnboardDeps) {
         const failures = checkSample(JSON.parse(new TextDecoder().decode(predicate)) as Predicate, sample)
         if (failures.length) return c.json({ error: `the vendor's current answer would fail this predicate: ${failures.join('; ')}` }, 422)
         if (await deps.labelTaken?.(label)) return c.json({ error: `label "${label}" is taken; pick another` }, 409)
+        // Checked here, on the server, for this exact payout: the client's own check is only a preview.
+        const owner = deps.checkOwner ? await deps.checkOwner(t.host, b.payout as Address) : undefined
+        if (deps.requireOwnerProof && !owner?.verified) {
+          return c.json({ error: `this gateway lists only APIs whose owner proved control of ${t.host}: ${owner?.detail ?? 'no check available'}`, instructions: ownerInstructions(t.host, b.payout as Address) }, 403)
+        }
         const wait = regsPerIp.take(visitor)
         if (wait) return c.json({ error: 'registration limit for this address reached; try tomorrow', retryAfterMs: wait }, 429)
         if (!regs.take()) return c.json({ error: 'today’s registration budget is used up' }, 429)
         const summary = String(b.summary ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').trim().slice(0, 200) || `${t.host} (onboarded)`
-        return c.json({ ok: true, ...(await deps.register({ origin: t.origin, examplePath: t.target, label, payout: b.payout as Address, price, predicate, summary, toolName })) })
+        const done = await deps.register({ origin: t.origin, examplePath: t.target, label, payout: b.payout as Address, price, predicate, summary, toolName, ...(owner ? { owner } : {}) })
+        return c.json({ ok: true, ...done, owner: owner ?? null })
       } catch (e) {
         return bad(c, e)
       }

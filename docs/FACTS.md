@@ -653,3 +653,26 @@ Started with `PUBLIC=1 REAL_VENDORS=npm,coinbase,mempool,kraken REMOTE_NOTARY_AD
 Not measured here:
 - **Proving across a real network.** The stand-in ran on the same machine, so prove times (about 1.1–1.7 s) are the localhost baseline. Numbers with the notary on another host go here after Bilgin's deploy.
 - **The kit's Docker image.** This environment has no Docker daemon. The image's Rust stage is the same as the main Dockerfile's; its entrypoint is what ran the stand-in above.
+
+### 15.13 Listing ownership (2026-11-18)
+
+**Against real hosts, from this environment** (`checkOwner` with the gateway's egress tunnel):
+
+| Host | Result |
+|---|---|
+| registry.npmjs.org | not verified: no TXT record at `_fermata.registry.npmjs.org`; `/.well-known/fermata.json` HTTP 404 (377 ms) |
+| api.coinbase.com | not verified: no TXT record; `/.well-known/fermata.json` HTTP 404 (102 ms) |
+| github.com | not verified: no TXT record; the certificate was refused (this environment's proxy intercepts github.com, and the fetch trusts Mozilla's roots only) |
+
+**A positive check against a real domain was not possible here:** publishing a TXT record or a
+`.well-known` file needs a domain this project controls. The positive paths are covered by unit tests:
+- fake DNS, for the TXT record;
+- a local HTTPS server with a throwaway CA, for the `.well-known` file.
+
+`PUBLIC=1 REAL_VENDORS=npm,coinbase,mempool,kraken bash scripts/demo-stack.sh up --chain anvil`:
+
+| Check | Result |
+|---|---|
+| `pnpm gateway:test` | 140 pass. Includes owner-check, the server-side check at register, 403 with `ONBOARD_REQUIRE_OWNER_PROOF` before any quota is spent, the daily re-check turning a lost proof into "owner not verified" (persisted), labels in `/services` and MCP, and `.well-known` fetching (redirects, size, non-200, untrusted certificate) |
+| `pnpm demo:onboard` | 9/9, including "ownership checked (npm publishes no proof)" and "labelled owner not verified for agents" |
+| `demo:cases` / `demo:real` / `demo:mcp` / `deploy/smoke.sh` | 3/3, 6/6, 7/7, 10/10 |

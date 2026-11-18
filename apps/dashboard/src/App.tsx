@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Predicate, type ProbeResult, type Reconciliation, type RegisterResult, type Reverify, type Scores, type Service } from './api.ts'
+import { api, type OwnerCheck, type Call, type DemoResult, type DemoStatus, type EscrowEvent, type Info, type Predicate, type ProbeResult, type Reconciliation, type RegisterResult, type Reverify, type Scores, type Service } from './api.ts'
 import { STATUS, age, bytes, serviceLabel, short, usd } from './format.ts'
 
 type Tab = 'live' | 'vendors' | 'onboard' | 'use' | 'reconciliation' | 'services'
@@ -542,7 +542,17 @@ function OnboardTab({ info }: { info?: Info }) {
   const [pred, setPred] = useState<Predicate>()
   const [result, setResult] = useState<RegisterResult>()
   const [test, setTest] = useState<DemoResult>()
+  const [owner, setOwner] = useState<OwnerCheck>()
   const [busy, setBusy] = useState<string>()
+  const payoutOk = /^0x[0-9a-fA-F]{40}$/.test(payout)
+  const checkOwner = async () => {
+    setBusy('owner')
+    try {
+      setOwner(await api.ownerCheck(url, payout))
+    } finally {
+      setBusy(undefined)
+    }
+  }
   const check = async () => {
     setBusy('check')
     setProbe(undefined)
@@ -643,6 +653,24 @@ function OnboardTab({ info }: { info?: Info }) {
                 <input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Latest version of an npm package" maxLength={200} />
               </label>
             </div>
+            {payoutOk && probe.origin ? (
+              <div className="note">
+                <b>Prove you run this API{owner?.required ? '' : ' (optional, recommended)'}.</b> Publish one of these for {probe.origin.replace('https://', '')}, naming this payout. Agents see
+                "owner verified" next to your listing; without it they see "owner not verified".
+                <Snippet label={`DNS: a TXT record at _fermata.${probe.origin.replace('https://', '')}`} code={`fermata-payout=${payout}`} />
+                <Snippet label={`or HTTPS: ${probe.origin}/.well-known/fermata.json`} code={JSON.stringify({ payout })} />
+                <div className="row-actions" style={{ marginTop: 8 }}>
+                  <button disabled={!!busy} onClick={() => void checkOwner()}>
+                    {busy === 'owner' ? 'Checking…' : 'Check ownership'}
+                  </button>
+                  {owner ? (
+                    <span>
+                      {owner.error ? `✗ ${owner.error}` : owner.verified ? `✓ Verified (${owner.method === 'dns' ? 'DNS TXT record' : '.well-known file'})` : `✗ Not verified yet: ${owner.detail}`}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <div className="row-actions">
               <button className="primary" disabled={!!busy || !label || !payout} onClick={() => void register()}>
                 {busy === 'register' ? 'Registering on-chain…' : 'Register'}
@@ -654,7 +682,8 @@ function OnboardTab({ info }: { info?: Info }) {
         {result?.ok ? (
           <div className="note">
             <b>✓ Registered.</b> Service <span className="mono">{short(result.serviceId)}</span> · tx <TxLink hash={result.txHash} info={info} /> · MCP tool{' '}
-            <span className="mono">{result.tool}</span>
+            <span className="mono">{result.tool}</span> ·{' '}
+            {result.owner?.verified ? `owner verified (${result.owner.method === 'dns' ? 'DNS' : '.well-known'})` : 'owner not verified: agents are told so'}
             <pre className="transcript" style={{ marginTop: 8 }}>{`// agents (mppx): one line, pay on proof
 const res = await mppx.fetch('${origin}${result.endpoint}')
 
@@ -675,7 +704,8 @@ ${origin === LIVE_DEMO ? 'claude mcp add fermata -- npx -y fermata-mcp' : `claud
       </div>
       <footer className="foot" style={{ padding: '0 14px 12px' }}>
         Testnet only. Your API must be public HTTPS on port 443 and speak TLS 1.2 with AES-128-GCM on P-256 (TLSNotary's profile); private and internal addresses are refused.
-        Registration is done by the Fermata operator on your behalf; payments go to your payout address.
+        Registration is done by the Fermata operator on your behalf; payments go to your payout address. An ownership proof shows you controlled the API's DNS or web
+        root when it was checked (re-checked daily), not that you wrote the API.
       </footer>
     </div>
   )
@@ -870,6 +900,23 @@ function VendorsTab({ scores, info }: { scores?: Scores; info?: Info }) {
                     <div className="muted origin" title={`notary key hash ${s.notary.keyHash} (on-chain); the operator label is the gateway's claim`}>
                       notary: {s.notary.label ?? short(s.notary.keyHash, 8)}
                     </div>
+                  ) : null}
+                  {s.listing ? (
+                    s.listing.by === 'operator' ? (
+                      <div className="muted origin" title="Configured by this gateway's operator, who is paid for it. For a third-party API (npm, Coinbase…) the operator is not the API's owner.">
+                        listed by the gateway's operator
+                      </div>
+                    ) : s.listing.ownerVerified ? (
+                      <span className="chip good" title={`checked ${s.listing.checkedAt ?? ''}`}>
+                        <span className="mark" aria-hidden>✓</span>
+                        owner verified ({s.listing.method === 'dns' ? 'DNS' : '.well-known'})
+                      </span>
+                    ) : (
+                      <span className="chip warning" title={s.listing.detail ?? 'the lister did not prove control of the API'}>
+                        <span className="mark" aria-hidden>!</span>
+                        owner not verified
+                      </span>
+                    )
                   ) : null}
                 </td>
                 <td className="num">

@@ -74,6 +74,7 @@ export type VendorScore = {
   notary: { keyHash: string; label: string | null } | null
   /** Superseded: still served and scored, no longer offered as a tool. */
   legacy: boolean
+  listing: Listing | null
 }
 export type Scores = { escrow: string; chainId: number; scannedTo: string; method: string; recompute: string; caveats: string[]; scores: VendorScore[] }
 
@@ -97,7 +98,16 @@ export type ProbeResult = {
   predicate?: Predicate
   sample?: { status: number; contentType: string | null; bodyBytes: number; body: string; tls: { protocol: string | null; cipher: string; group: string | null; issuer: string | null } }
 }
-export type RegisterResult = { ok?: boolean; error?: string; serviceId?: string; txHash?: string; endpoint?: string; tool?: string }
+export type OwnerProof = { verified: boolean; method?: 'dns' | 'well-known'; checkedAt: string; detail: string }
+export type OwnerCheck = OwnerProof & {
+  error?: string
+  host?: string
+  required?: boolean
+  instructions?: { dns: { name: string; type: string; value: string }; wellKnown: { url: string; body: string } }
+}
+export type RegisterResult = { ok?: boolean; error?: string; serviceId?: string; txHash?: string; endpoint?: string; tool?: string; owner?: OwnerProof | null; instructions?: OwnerCheck['instructions'] }
+/** Who listed a service: the gateway's operator, or a lister through self-serve onboarding (with its ownership proof). */
+export type Listing = { by: 'operator' } | { by: 'lister'; ownerVerified: boolean; method: 'dns' | 'well-known' | null; checkedAt: string | null; detail: string | null }
 
 export type Movement = { token: string; from: string; to: string; amount: string; txHash: string; blockNumber: string }
 export type Reconciliation = { callId: string; status: CallStatus; token: string; expected: string; match: boolean; movements: Movement[]; ignored?: number }
@@ -133,6 +143,10 @@ export const api = {
   probe: async (url: string): Promise<ProbeResult> => {
     const res = await fetch('/onboard/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }) })
     return (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as ProbeResult
+  },
+  ownerCheck: async (url: string, payout: string): Promise<OwnerCheck> => {
+    const res = await fetch('/onboard/owner-check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, payout }) })
+    return (await res.json().catch(() => ({ verified: false, error: `HTTP ${res.status}` }))) as OwnerCheck
   },
   register: async (body: Record<string, unknown>): Promise<RegisterResult> => {
     const res = await fetch('/onboard/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })

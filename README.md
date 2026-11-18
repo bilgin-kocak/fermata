@@ -170,11 +170,25 @@ Two more limits are stated with the scores:
 
 `pnpm demo:onboard` runs this end to end against the real npm registry (7/7).
 
-**Listings are not ownership-checked in this testnet demo.** Anyone can list any public HTTPS API
-under their own payout address, so a listing says nothing about who runs the API. Agents choose
-which services to pay (and the scoreboard only ranks what was proven); a production version would
-require proof of control of the origin, such as a DNS TXT record or a `/.well-known` file, before
-registering a payout for it.
+**Listing ownership.** A lister can prove it controls the API's host, for the exact payout address it
+registers, in one of two ways:
+- a DNS TXT record at `_fermata.<host>` with the value `fermata-payout=<payout>`;
+- `https://<host>/.well-known/fermata.json` containing `{"payout": "<payout>"}`. It's fetched only from
+  a public address, with the certificate checked against Mozilla's roots, no redirects, and at most 4 KB.
+
+The gateway checks the proof itself at registration and again every day. The label appears
+everywhere the listing does:
+- on the scoreboard: **owner verified** or **owner not verified**;
+- in the MCP tool description, so agents read it before paying;
+- in `/services`.
+
+Unverified listings are allowed in this demo, because most visitors don't control a domain. Set
+`ONBOARD_REQUIRE_OWNER_PROOF=1` to refuse them. Services the gateway's operator configured itself
+(the demo's npm, Coinbase, mempool.space and Kraken listings) are labelled **listed by the gateway's
+operator**. For those third-party APIs, the operator is not the API's owner.
+
+A proof shows control of the host's DNS or web root when it was checked. It doesn't show who wrote
+the API, and that control can change hands; the daily re-check catches a proof that's been removed.
 
 ![List your API: compatibility check and the drafted delivery rule (local Tempo emulation)](docs/img/public-onboard.png)
 
