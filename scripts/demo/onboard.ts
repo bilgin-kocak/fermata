@@ -3,8 +3,10 @@
 // Self-serve onboarding end to end, through the public API only, against a real third-party API:
 //   1 probe a real vendor (registry.npmjs.org): TLSNotary-compatible, a drafted delivery rule
 //   2 refuse URLs that would reach the server's own network (SSRF guard)
-//   3 register it on-chain with the drafted rule; it is served, listed and exposed over MCP at once
-//   4 a paid test call is proved and released; 5 it shows on the vendor scoreboard; 6 the proof re-verifies
+//   3 check ownership: npm publishes no Fermata proof (no _fermata TXT record, no .well-known file),
+//     so the listing is registered as "owner not verified" and agents are told so
+//   4 register it on-chain with the drafted rule; it is served, listed and exposed over MCP at once
+//   5 a paid test call is proved and released; 6 it shows on the vendor scoreboard; 7 the proof re-verifies
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { randomBytes } from 'node:crypto'
@@ -29,6 +31,15 @@ check('refuse unsafe URLs', refused.every((r) => r.status === 400), refused.map(
 
 const label = `viem-${randomBytes(2).toString('hex')}`
 const payout = `0x${randomBytes(20).toString('hex')}`
+// npm has published no Fermata ownership proof, so a listing of it is "owner not verified" (a real
+// DNS lookup and a real fetch of its /.well-known/fermata.json, both answered "none").
+const owner = await post('/onboard/owner-check', { url, payout })
+check(
+  'ownership checked (npm publishes no proof)',
+  owner.status === 200 && owner.body.verified === false && owner.body.instructions?.dns?.name === '_fermata.registry.npmjs.org',
+  `${owner.body.detail ?? owner.body.error}; to verify: TXT ${owner.body.instructions?.dns?.name} = ${owner.body.instructions?.dns?.value}`,
+)
+
 const reg = await post('/onboard/register', { url, label, payout, price: '0.01', summary: 'Latest published versions of viem on npm', toolName: `viem_versions_${label.replace(/-/g, '_')}`, predicate: probe.body.predicate })
 check('register on-chain', reg.status === 200 && reg.body.ok, reg.body.ok ? `${reg.body.serviceId.slice(0, 18)}… tx ${link(reg.body.txHash)}` : reg.body.error)
 
@@ -38,6 +49,15 @@ await mcp.connect(new StreamableHTTPClientTransport(new URL(`${stack.gateway}/mc
 const tools = (await mcp.listTools()).tools.map((t) => t.name)
 await mcp.close()
 check('served, listed and on MCP at once', services.some((s) => s.serviceId === reg.body.serviceId) && tools.includes(reg.body.tool), `/services has it; MCP tools include ${reg.body.tool}`)
+const listing = (services as { serviceId: string; listing?: { by: string; ownerVerified?: boolean } }[]).find((s) => s.serviceId === reg.body.serviceId)?.listing
+const description = (await (async () => {
+  const c = new Client({ name: 'demo-onboard', version: '0.0.0' })
+  await c.connect(new StreamableHTTPClientTransport(new URL(`${stack.gateway}/mcp`)))
+  const d = (await c.listTools()).tools.find((t) => t.name === reg.body.tool)?.description ?? ''
+  await c.close()
+  return d
+})())
+check('labelled "owner not verified" for agents', listing?.by === 'lister' && listing.ownerVerified === false && description.includes('has NOT proved it controls this API'), `listing ${JSON.stringify(listing)}; MCP: "…${description.slice(description.indexOf('the lister'), description.indexOf('the lister') + 70)}…"`)
 
 const call = await post('/demo/call', { serviceId: reg.body.serviceId })
 check('paid test call released', call.body.outcome === 'DELIVERED', `HTTP ${call.body.status} ${call.body.outcome ?? call.body.error} settle ${link(call.body.settleTx)}`)

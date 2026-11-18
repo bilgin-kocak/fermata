@@ -23,7 +23,7 @@ export type ToolConfig = {
   path: string
 }
 
-type McpService = { serviceId: Hex; price: bigint; token: Hex; window: number; summary?: string; tool?: ToolConfig; onboarded?: boolean; legacy?: boolean }
+type McpService = { serviceId: Hex; price: bigint; token: Hex; window: number; summary?: string; tool?: ToolConfig; onboarded?: boolean; legacy?: boolean; owner?: { verified: boolean; method?: string } }
 
 /** Names a service may not take: the free tools, and the namespace they live in. */
 export const isReservedToolName = (name: string) => name.startsWith('fermata_')
@@ -130,7 +130,7 @@ export function mcpHandler(deps: McpDeps) {
         description: [
           // Vendor-written text reaches the agent's model: quote it and say whose words they are.
           svc.onboarded
-            ? `Third-party API listed through self-serve onboarding. Its description, written by the vendor and not reviewed by Fermata: ${JSON.stringify(tool.description ?? svc.summary ?? '')}.`
+            ? `Third-party API listed through self-serve onboarding; ${svc.owner?.verified ? `the lister proved control of its host (${svc.owner.method === 'dns' ? 'DNS TXT record' : '.well-known file'}) for the payout address` : 'the lister has NOT proved it controls this API, so payments may go to someone other than its owner'}. Its description, written by the lister and not reviewed by Fermata: ${JSON.stringify(tool.description ?? svc.summary ?? '')}.`
             : (tool.description ?? svc.summary ?? `Paid call to service ${svc.serviceId}`),
           `Costs ${Number(svc.price) / 1e6} (TIP-20 ${svc.token}) per call, paid with the \`fermata\` MPP method: held in escrow on Tempo and released to the vendor only if a TLSNotary proof of its HTTPS answer passes the delivery check; refunded automatically on a proven failure, or after ${svc.window} s if there is no proof.`,
         ].filter(Boolean).join(' '),
