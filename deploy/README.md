@@ -10,14 +10,14 @@ Only the gateway is exposed, behind Caddy with automatic HTTPS. The notary, atte
 ## Railway (what the live demo runs on)
 
 The repo's `Dockerfile` builds the whole stack into one container (attestor built in a Rust stage;
-dashboard and dev certificates built in the image), and `railway.json` sets the health check (`/info`)
-and the restart policy. The container runs `scripts/demo-stack.sh run --chain moderato` in public mode.
+dashboard built in the image), and `railway.json` sets the health check (`/info`) and the restart
+policy. The container runs `scripts/demo-stack.sh run --chain moderato` in public mode.
 
 ```sh
 railway init -n fermata                      # new project, linked to this directory
 railway add --service fermata
 railway domain --service fermata --port 8080 # → https://<name>.up.railway.app
-railway volume add --mount-path /data        # calls, proofs, onboarded vendors survive deploys
+railway volume add --mount-path /data        # calls, proofs, onboarded vendors, the demo CA survive deploys
 # keys: a fresh set for the hosted demo (never your laptop's relayer: the two would race for nonces),
 # funded with `cast rpc tempo_fundAddress <address>`: VERIFIER_, RELAYER_, VENDOR_, NOTARY_ and
 # DEMO_AGENT_PRIVATE_KEY, plus GATEWAY_SECRET_KEY (32 random bytes)
@@ -30,6 +30,13 @@ Behind Railway's edge the visitor's address is the second `X-Forwarded-For` entr
 edge appends the visitor, then its own hop), hence `GATEWAY_TRUST_PROXY=2` in the image; entries
 further left come from the visitor and are ignored, so nobody dodges the per-visitor limits by
 sending their own header. Each demo call logs the visitor and the raw headers, to check this.
+
+**The demo CA lives on the volume, not in the image.** The mock vendors' certificates come from a demo
+CA, and a mock vendor's proof re-verifies only against the CA in use when it was made. The stack makes
+the CA at its first start in `$FERMATA_STATE_DIR/certs`, renews it at a start when it expires within 14
+days, and keeps trusting every CA it used before (`certs/history/`, plus the earlier builds' CAs in
+[`demo-cas/`](demo-cas/README.md)). `/ca.pem` serves that bundle. Until 2026-11-18 the image made a new
+CA at every build, so each rebuild broke the offline re-verification of older mock-vendor proofs.
 
 ## A VM instead
 
@@ -67,7 +74,7 @@ sudo bash /opt/fermata/deploy/bootstrap.sh fermata.example.com     # or: auto
 | Testnet funds | `sudo -u fermata -H bash -lc 'cd /opt/fermata && pnpm fund'`; the gateway also tops up the demo agent and relayer itself, and turns the demo read-only rather than failing |
 | Recompute the scoreboard | `pnpm scores --chain moderato` (from any machine; reads only the chain) |
 | Settings | `/etc/fermata/fermata.env`: limits (`DEMO_PER_IP_SECONDS`, `DEMO_PER_IP_PER_DAY`, `DEMO_DAILY_CAP`), `REAL_VENDORS` |
-| State | `/var/lib/fermata/state`: calls, proofs, onboarded vendors (survive restarts) |
+| State | `/var/lib/fermata/state`: calls, proofs, onboarded vendors, the demo CA (survive restarts) |
 
 ## How it fits together
 

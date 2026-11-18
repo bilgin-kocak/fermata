@@ -22,6 +22,7 @@ vendor/
 # local TLS material
 certs/
 *.pem
+!deploy/demo-cas/*.pem
 *.key
 *.crt
 

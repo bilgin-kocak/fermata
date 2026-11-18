@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Local dev CA + P-256 leaf for vendor.fermata.test (no mkcert here). Output: certs/{ca.pem,vendor.pem,vendor-key.pem}
+# Dev CA + P-256 leaf for vendor.fermata.test (no mkcert here), valid 825 days.
+#   bash apps/vendor/gen-certs.sh [dir]     dir defaults to apps/vendor/certs
+# Output: <dir>/{ca.pem,ca-key.pem,vendor.pem,vendor-key.pem}
 set -euo pipefail
-cd "$(dirname "$0")"
-mkdir -p certs && cd certs
+OUT=${1:-"$(dirname "$0")/certs"}
+mkdir -p "$OUT" && cd "$OUT"
 [ -f ca.pem ] && [ -f vendor.pem ] && { echo "certs exist"; exit 0; }
 cat > ca.cnf <<CNF
 [req]
@@ -31,10 +33,10 @@ subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid
 CNF
 openssl ecparam -name prime256v1 -genkey -noout -out ca-key.pem
-openssl req -x509 -new -key ca-key.pem -sha256 -days 90 -out ca.pem -config ca.cnf
+openssl req -x509 -new -key ca-key.pem -sha256 -days 825 -out ca.pem -config ca.cnf
 openssl ecparam -name prime256v1 -genkey -noout -out vendor-key.pem
 openssl req -new -key vendor-key.pem -out vendor.csr -config leaf.cnf
-openssl x509 -req -in vendor.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -days 90 -sha256 -out vendor.pem -extfile leaf.cnf -extensions ext
+openssl x509 -req -in vendor.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -days 825 -sha256 -out vendor.pem -extfile leaf.cnf -extensions ext
 rm -f vendor.csr ca.cnf leaf.cnf
 openssl x509 -in vendor.pem -noout -subject -ext subjectAltName
 echo "certs generated"

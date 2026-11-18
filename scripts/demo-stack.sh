@@ -87,8 +87,34 @@ else
   (cd apps/attestor && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo +1.95.0 build --release -q)
   BIN=$(cd apps/attestor && realpath "${CARGO_TARGET_DIR:-target}")/release/fermata-attest
 fi
-[ -f apps/vendor/certs/ca.pem ] || bash apps/vendor/gen-certs.sh > "$DIR/certs.log"
-CA=$PWD/apps/vendor/certs/ca.pem
+# The mock vendors' demo CA. A proof of a mock vendor re-verifies only against the CA in use when it
+# was made, so a hosted stack (FERMATA_STATE_DIR set) keeps its CA there, where it survives
+# rebuilds; renews it at start when its certificate expires within 14 days; and keeps trusting
+# every CA it used before: its own history plus deploy/demo-cas/ (CAs of earlier builds).
+if [ -n "${FERMATA_STATE_DIR:-}" ]; then
+  case "$STATE" in /*) CERTS=$STATE/certs ;; *) CERTS=$PWD/$STATE/certs ;; esac
+else CERTS=$PWD/apps/vendor/certs; fi
+ca_id() { openssl x509 -noout -fingerprint -sha256 -in "$1" | cut -d= -f2 | tr -d : | cut -c1-16; }
+mkdir -p "$CERTS/history"
+if [ -f "$CERTS/vendor.pem" ] && ! openssl x509 -checkend $((14 * 86400)) -noout -in "$CERTS/vendor.pem" > /dev/null; then
+  echo "== demo CA expires within 14 days: renewing it (the old one stays trusted)"
+  cp "$CERTS/ca.pem" "$CERTS/history/$(ca_id "$CERTS/ca.pem").pem"
+  rm -f "$CERTS/ca.pem" "$CERTS/ca-key.pem" "$CERTS/vendor.pem" "$CERTS/vendor-key.pem" "$CERTS/ca.srl"
+fi
+{ [ -f "$CERTS/ca.pem" ] && [ -f "$CERTS/vendor.pem" ]; } || bash apps/vendor/gen-certs.sh "$CERTS" > "$DIR/certs.log"
+export CERTS_DIR=$CERTS # apps/vendor/server.mjs
+# The trust bundle (notary, attestor, GET /ca.pem): the current CA first, then each earlier one once.
+CA=$PWD/$DIR/ca-bundle.pem
+cp "$CERTS/ca.pem" "$CA"
+SEEN=" $(ca_id "$CERTS/ca.pem") "
+OLD_CAS=("$CERTS"/history/*.pem)
+[ -n "${FERMATA_STATE_DIR:-}" ] && OLD_CAS+=(deploy/demo-cas/*.pem)
+for f in "${OLD_CAS[@]}"; do
+  [ -f "$f" ] || continue
+  id=$(ca_id "$f"); case "$SEEN" in *" $id "*) continue ;; esac
+  SEEN="$SEEN$id "; cat "$f" >> "$CA"
+done
+echo "demo CA $(ca_id "$CERTS/ca.pem") in $CERTS; trusting $(grep -c 'BEGIN CERTIFICATE' "$CA") demo CA(s)"
 # (Re)build the dashboard when it is missing or older than its sources, so the stack never serves a stale UI.
 if [ -f apps/dashboard/package.json ] && { [ ! -f apps/dashboard/dist/index.html ] ||
   [ -n "$(find apps/dashboard/src apps/dashboard/index.html apps/dashboard/vite.config.ts apps/dashboard/package.json -newer apps/dashboard/dist/index.html 2>/dev/null | head -1)" ]; }; then

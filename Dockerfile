@@ -10,7 +10,8 @@ COPY apps/attestor ./
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 RUN cargo build --release --locked && cp target/release/fermata-attest /fermata-attest
 
-# --- 2. Node: workspace dependencies, dashboard, dev certificates for the mock vendors.
+# --- 2. Node: workspace dependencies, dashboard. The mock vendors' demo CA is made at the first start
+# and kept in FERMATA_STATE_DIR, not in the image: proofs must outlive a rebuild (scripts/demo-stack.sh).
 FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl jq openssl procps \
   && rm -rf /var/lib/apt/lists/*
@@ -24,7 +25,7 @@ COPY apps/vendor/package.json apps/vendor/
 COPY packages/sdk/package.json packages/sdk/
 RUN corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm -F @fermata/dashboard build && bash apps/vendor/gen-certs.sh
+RUN pnpm -F @fermata/dashboard build
 COPY --from=attestor /fermata-attest /usr/local/bin/fermata-attest
 
 ENV FERMATA_ATTEST_BIN=/usr/local/bin/fermata-attest \
